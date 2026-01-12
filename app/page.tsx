@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { Home, Building, Settings, Menu, X, Save, Upload, Download } from "lucide-react";
+import { Home, Building, Settings, Menu, X, Save, Upload, Download, Search, Filter, AlertCircle, CheckCircle, Clock } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiService, RoomData, MasterData } from "@/services/api";
@@ -28,6 +28,15 @@ interface InteractiveMapProps {
   onRoomClick: (roomId: string) => void;
 }
 
+// --- Tipe untuk Filter ---
+interface FilterOptions {
+  search: string;
+  gedung: string;
+  fakultas: string;
+  lantai: string;
+  subUnit: string;
+}
+
 // --- Data untuk Dropdown (Sesuaikan dengan API) ---
 const unitKerjaOptions = [
   { value: "Fakultas Syariah", label: "01. Fakultas Syariah" },
@@ -51,6 +60,202 @@ const subUnitKerjaOptions = [
   { value: "Prodi Magister Manajemen", label: "06. Prodi Magister Manajemen" },
   { value: "Prodi Doktor Manajemen", label: "07. Prodi Doktor Manajemen" },
 ];
+
+// --- Fungsi untuk mengecek status API ---
+const useApiStatus = () => {
+  const [apiStatus, setApiStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [responseTime, setResponseTime] = useState<number | null>(null);
+  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const checkApiStatus = useCallback(async () => {
+    try {
+      setApiStatus('checking');
+      const startTime = performance.now();
+      
+      // Coba panggil endpoint health check atau endpoint yang sederhana
+      const result = await apiService.getStatistics();
+      const endTime = performance.now();
+      
+      const responseTimeMs = Math.round(endTime - startTime);
+      setResponseTime(responseTimeMs);
+      
+      if (result.success) {
+        setApiStatus('online');
+      } else {
+        setApiStatus('offline');
+      }
+    } catch (error) {
+      console.error('API status check failed:', error);
+      setApiStatus('offline');
+      setResponseTime(null);
+    } finally {
+      setLastChecked(new Date());
+    }
+  }, []);
+
+  // Fungsi untuk memulai/menghentikan monitoring
+  const startMonitoring = useCallback((intervalMs: number = 30000) => {
+    // Cek status pertama kali
+    checkApiStatus();
+    
+    // Set interval untuk pengecekan berkala
+    if (checkIntervalRef.current) {
+      clearInterval(checkIntervalRef.current);
+    }
+    
+    checkIntervalRef.current = setInterval(checkApiStatus, intervalMs);
+  }, [checkApiStatus]);
+
+  const stopMonitoring = useCallback(() => {
+    if (checkIntervalRef.current) {
+      clearInterval(checkIntervalRef.current);
+      checkIntervalRef.current = null;
+    }
+  }, []);
+
+  // Format waktu terakhir pengecekan
+  const getLastCheckedText = () => {
+    if (!lastChecked) return 'Belum diperiksa';
+    
+    const now = new Date();
+    const diffMs = now.getTime() - lastChecked.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    
+    if (diffSec < 60) {
+      return `${diffSec} detik yang lalu`;
+    } else if (diffSec < 3600) {
+      return `${Math.floor(diffSec / 60)} menit yang lalu`;
+    } else {
+      return `${Math.floor(diffSec / 3600)} jam yang lalu`;
+    }
+  };
+
+  useEffect(() => {
+    // Mulai monitoring saat komponen mount
+    startMonitoring(30000); // Cek setiap 30 detik
+    
+    // Cleanup saat unmount
+    return () => {
+      stopMonitoring();
+    };
+  }, [startMonitoring, stopMonitoring]);
+
+  return {
+    apiStatus,
+    lastChecked,
+    responseTime,
+    getLastCheckedText,
+    checkApiStatus,
+    startMonitoring,
+    stopMonitoring
+  };
+};
+
+// --- Komponen ApiStatusIndicator ---
+const ApiStatusIndicator: React.FC = () => {
+  const { apiStatus, lastChecked, responseTime, getLastCheckedText, checkApiStatus } = useApiStatus();
+  const [isHovered, setIsHovered] = useState(false);
+  
+  const getStatusConfig = () => {
+    switch (apiStatus) {
+      case 'online':
+        return {
+          color: 'text-green-600',
+          bg: 'bg-green-100',
+          border: 'border-green-200',
+          icon: '🟢',
+          text: 'Online',
+          iconComponent: <CheckCircle size={14} className="text-green-600" />
+        };
+      case 'offline':
+        return {
+          color: 'text-red-600',
+          bg: 'bg-red-100',
+          border: 'border-red-200',
+          icon: '🔴',
+          text: 'Offline',
+          iconComponent: <AlertCircle size={14} className="text-red-600" />
+        };
+      case 'checking':
+        return {
+          color: 'text-yellow-600',
+          bg: 'bg-yellow-100',
+          border: 'border-yellow-200',
+          icon: '🟡',
+          text: 'Checking...',
+          iconComponent: <Clock size={14} className="text-yellow-600" />
+        };
+      default:
+        return {
+          color: 'text-gray-600',
+          bg: 'bg-gray-100',
+          border: 'border-gray-200',
+          icon: '⚪',
+          text: 'Unknown',
+          iconComponent: <AlertCircle size={14} className="text-gray-600" />
+        };
+    }
+  };
+
+  const statusConfig = getStatusConfig();
+
+  return (
+    <div className="relative">
+      <div 
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${statusConfig.bg} ${statusConfig.border} transition-all duration-300 cursor-help hover:shadow-sm`}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        onClick={() => checkApiStatus()}
+      >
+        <div className="flex items-center gap-1.5">
+          {statusConfig.iconComponent}
+          <span className="text-sm font-medium">
+            API: <span className={`font-bold ${statusConfig.color}`}>{statusConfig.text}</span>
+          </span>
+          {responseTime && apiStatus === 'online' && (
+            <span className="text-xs text-gray-500 ml-1">
+              ({responseTime}ms)
+            </span>
+          )}
+        </div>
+      </div>
+      
+      {/* Tooltip dengan info detail */}
+      {isHovered && (
+        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
+          <div className="bg-gray-900 text-white text-xs rounded-lg py-2 px-3 whitespace-nowrap shadow-lg border border-gray-700">
+            <div className="font-medium mb-1">Status Sistem</div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-gray-300">Status API:</span>
+                <span className={`font-bold ${statusConfig.color}`}>
+                  {statusConfig.text}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-gray-300">Terakhir diperiksa:</span>
+                <span>{getLastCheckedText()}</span>
+              </div>
+              {responseTime && (
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-300">Response time:</span>
+                  <span className={responseTime > 1000 ? 'text-yellow-400' : 'text-green-400'}>
+                    {responseTime} ms
+                  </span>
+                </div>
+              )}
+              <div className="text-gray-400 text-[10px] mt-2 pt-1 border-t border-gray-700">
+                Klik untuk refresh • Auto-refresh setiap 30 detik
+              </div>
+            </div>
+          </div>
+          <div className="absolute top-full left-1/2 transform -translate-x-1/2 -translate-y-1/2 rotate-45 w-2 h-2 bg-gray-900"></div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // --- Komponen RoomPopup dengan integrasi API ---
 const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
@@ -563,8 +768,18 @@ export default function DashboardWithMap() {
   const [svgContent, setSvgContent] = useState("");
   const [popupRoomId, setPopupRoomId] = useState<string | null>(null);
   const [roomsData, setRoomsData] = useState<RoomData[]>([]);
+  const [filteredRooms, setFilteredRooms] = useState<RoomData[]>([]);
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [stats, setStats] = useState<any>(null);
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+    search: "",
+    gedung: "",
+    fakultas: "",
+    lantai: "",
+    subUnit: "",
+  });
+  const [showFilters, setShowFilters] = useState(false);
+  const { apiStatus, checkApiStatus } = useApiStatus();
 
   const lantai = [1, 2, 3, 4, 5, 6, 7, 8];
 
@@ -581,6 +796,7 @@ export default function DashboardWithMap() {
       const result = await apiService.getFakultasEkonomi();
       if (result.success && result.data) {
         setRoomsData(result.data);
+        setFilteredRooms(result.data);
       }
     } catch (error) {
       console.error("Error fetching rooms:", error);
@@ -600,6 +816,58 @@ export default function DashboardWithMap() {
       console.error("Error fetching stats:", error);
     }
   };
+
+  // Filter rooms berdasarkan kriteria
+  const applyFilters = useCallback(() => {
+    let result = [...roomsData];
+
+    // Filter by search (mencari di semua field)
+    if (filterOptions.search) {
+      const searchLower = filterOptions.search.toLowerCase();
+      result = result.filter(room => 
+        room.ruangan.toLowerCase().includes(searchLower) ||
+        room.fk.toLowerCase().includes(searchLower) ||
+        (room.subUnit && room.subUnit.toLowerCase().includes(searchLower)) ||
+        room.gedung.toLowerCase().includes(searchLower) ||
+        room.no.toString().includes(searchLower)
+      );
+    }
+
+    // Filter by gedung
+    if (filterOptions.gedung) {
+      result = result.filter(room => 
+        room.gedung.toLowerCase() === filterOptions.gedung.toLowerCase()
+      );
+    }
+
+    // Filter by fakultas
+    if (filterOptions.fakultas) {
+      result = result.filter(room => 
+        room.fk.toLowerCase() === filterOptions.fakultas.toLowerCase()
+      );
+    }
+
+    // Filter by lantai
+    if (filterOptions.lantai) {
+      result = result.filter(room => 
+        room.lantai.toString() === filterOptions.lantai
+      );
+    }
+
+    // Filter by subUnit
+    if (filterOptions.subUnit) {
+      result = result.filter(room => 
+        room.subUnit && room.subUnit.toLowerCase() === filterOptions.subUnit.toLowerCase()
+      );
+    }
+
+    setFilteredRooms(result);
+  }, [roomsData, filterOptions]);
+
+  // Terapkan filter saat filterOptions berubah
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
 
   // Load SVG
   useEffect(() => {
@@ -635,6 +903,23 @@ export default function DashboardWithMap() {
     }
   }, [active]);
 
+  // Cek API status saat melakukan operasi data
+  const handleApiOperation = async (operation: () => Promise<any>) => {
+    if (apiStatus === 'offline') {
+      if (!confirm('API sedang offline. Apakah Anda ingin mencoba melanjutkan?')) {
+        return;
+      }
+    }
+    
+    try {
+      await operation();
+    } catch (error) {
+      console.error('Operation failed:', error);
+      // Refresh status API setelah error
+      await checkApiStatus();
+    }
+  };
+
   const closePopup = () => {
     setPopupRoomId(null);
   };
@@ -645,7 +930,7 @@ export default function DashboardWithMap() {
   };
 
   const handleExportData = () => {
-    const dataStr = JSON.stringify(roomsData, null, 2);
+    const dataStr = JSON.stringify(filteredRooms, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
     const exportFileDefaultName = `data-ruangan-${new Date().toISOString().split('T')[0]}.json`;
     
@@ -656,6 +941,34 @@ export default function DashboardWithMap() {
     linkElement.click();
     document.body.removeChild(linkElement);
   };
+
+  const handleFilterChange = (key: keyof FilterOptions, value: string) => {
+    setFilterOptions(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
+  const resetFilters = () => {
+    setFilterOptions({
+      search: "",
+      gedung: "",
+      fakultas: "",
+      lantai: "",
+      subUnit: "",
+    });
+    setFilteredRooms(roomsData);
+  };
+
+  // Ekstrak nilai unik untuk dropdown filter
+  const gedungOptions = Array.from(new Set(roomsData.map(room => room.gedung)));
+  const fakultasOptions = Array.from(new Set(roomsData.map(room => room.fk)));
+  const lantaiOptions = Array.from(new Set(roomsData.map(room => room.lantai.toString()))).sort();
+  const subUnitOptions = Array.from(new Set(
+    roomsData
+      .map(room => room.subUnit)
+      .filter(subUnit => subUnit && subUnit.trim() !== "")
+  ));
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
@@ -731,9 +1044,7 @@ export default function DashboardWithMap() {
               {menuItems.find(item => item.id === active)?.name || 'Dashboard'}
             </h2>
             <div className="flex items-center gap-2">
-              <span className="text-gray-500 text-sm sm:text-base bg-gray-100 px-3 py-1 rounded-full border border-gray-200">
-                API Status: <span className="text-green-600 font-bold">Online</span>
-              </span>
+              <ApiStatusIndicator />
               {active === "manajemen" && (
                 <button
                   onClick={handleExportData}
@@ -753,6 +1064,42 @@ export default function DashboardWithMap() {
                   <Home className="inline mr-2 text-blue-500" size={24} /> Dashboard Sistem
                 </h3>
                 
+                {/* Status API Card */}
+                <div className="mb-6">
+                  <div className={`p-4 rounded-lg border-l-4 ${
+                    apiStatus === 'online' ? 'border-green-500 bg-green-50' :
+                    apiStatus === 'offline' ? 'border-red-500 bg-red-50' :
+                    'border-yellow-500 bg-yellow-50'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-semibold text-gray-800">Status Sistem</h4>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`font-bold ${
+                            apiStatus === 'online' ? 'text-green-600' :
+                            apiStatus === 'offline' ? 'text-red-600' :
+                            'text-yellow-600'
+                          }`}>
+                            {apiStatus === 'online' ? '🟢 Semua Sistem Berjalan Normal' :
+                             apiStatus === 'offline' ? '🔴 API Offline - Beberapa Fitur Mungkin Terbatas' :
+                             '🟡 Memeriksa Status Sistem...'}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-2">
+                          Sistem akan secara otomatis mendeteksi koneksi ke server API setiap 30 detik.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => checkApiStatus()}
+                        className="px-3 py-1 text-sm bg-white border border-gray-300 rounded hover:bg-gray-50 flex items-center gap-1"
+                      >
+                        <RefreshCw size={14} />
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {stats && (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                     <div className="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-500">
@@ -778,6 +1125,11 @@ export default function DashboardWithMap() {
                   <div className="mt-3 text-sm text-gray-600">
                     <p>• Data tersimpan di database MySQL</p>
                     <p>• Update real-time melalui API</p>
+                    <p>• Status API: <span className={
+                      apiStatus === 'online' ? 'text-green-600 font-bold' :
+                      apiStatus === 'offline' ? 'text-red-600 font-bold' :
+                      'text-yellow-600 font-bold'
+                    }>{apiStatus === 'online' ? 'Online' : apiStatus === 'offline' ? 'Offline' : 'Checking...'}</span></p>
                     <p>• Ekspor data dalam format JSON</p>
                   </div>
                 </div>
@@ -833,18 +1185,176 @@ export default function DashboardWithMap() {
                   <Settings className="inline mr-2 text-blue-500" size={24} /> Manajemen Data Ruangan
                 </h3>
                 
-                <div className="mb-6 flex justify-between items-center">
+                {/* Peringatan jika API offline */}
+                {apiStatus === 'offline' && (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <AlertCircle className="text-red-600 flex-shrink-0" size={20} />
+                      <div className="flex-1">
+                        <div className="text-red-700 font-semibold">⚠️ PERINGATAN: API Sedang Offline</div>
+                        <div className="text-red-600 text-sm mt-1">
+                          Beberapa fitur mungkin tidak tersedia. Data yang ditampilkan mungkin tidak terbaru.
+                          <button 
+                            onClick={() => checkApiStatus()}
+                            className="ml-2 text-red-800 font-medium hover:underline"
+                          >
+                            Coba koneksi ulang
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Search and Filter Section */}
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                    {/* Search Bar */}
+                    <div className="relative flex-1">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Search className="h-5 w-5 text-gray-400" />
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Cari ruangan, fakultas, atau kode..."
+                        value={filterOptions.search}
+                        onChange={(e) => handleFilterChange('search', e.target.value)}
+                        className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      {/* Filter Toggle */}
+                      <button
+                        onClick={() => setShowFilters(!showFilters)}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                      >
+                        <Filter size={16} />
+                        {showFilters ? 'Sembunyikan Filter' : 'Tampilkan Filter'}
+                      </button>
+
+                      {/* Refresh Button */}
+                      <button
+                        onClick={() => handleApiOperation(fetchRoomsData)}
+                        disabled={isLoadingRooms}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        <Upload size={16} />
+                        {isLoadingRooms ? "Memuat..." : "Refresh"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filter Options */}
+                  {showFilters && (
+                    <div className="mt-4 p-4 bg-white rounded-lg border border-gray-200">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                        {/* Filter by Gedung */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Filter by Gedung
+                          </label>
+                          <select
+                            value={filterOptions.gedung}
+                            onChange={(e) => handleFilterChange('gedung', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                          >
+                            <option value="">Semua Gedung</option>
+                            {gedungOptions.map((gedung) => (
+                              <option key={gedung} value={gedung}>
+                                {gedung}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Filter by Fakultas */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Filter by Fakultas
+                          </label>
+                          <select
+                            value={filterOptions.fakultas}
+                            onChange={(e) => handleFilterChange('fakultas', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                          >
+                            <option value="">Semua Fakultas</option>
+                            {fakultasOptions.map((fakultas) => (
+                              <option key={fakultas} value={fakultas}>
+                                {fakultas}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Filter by Lantai */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Filter by Lantai
+                          </label>
+                          <select
+                            value={filterOptions.lantai}
+                            onChange={(e) => handleFilterChange('lantai', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                          >
+                            <option value="">Semua Lantai</option>
+                            {lantaiOptions.map((lantai) => (
+                              <option key={lantai} value={lantai}>
+                                Lantai {lantai}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Filter by Sub Unit */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Filter by Sub Unit
+                          </label>
+                          <select
+                            value={filterOptions.subUnit}
+                            onChange={(e) => handleFilterChange('subUnit', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                          >
+                            <option value="">Semua Sub Unit</option>
+                            {subUnitOptions.map((subUnit) => (
+                              <option key={subUnit} value={subUnit}>
+                                {subUnit}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="text-sm text-gray-600">
+                          Menampilkan {filteredRooms.length} dari {roomsData.length} data
+                          {filterOptions.search && (
+                            <span className="ml-2 text-blue-600">
+                              • Pencarian: "{filterOptions.search}"
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={resetFilters}
+                          className="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+                        >
+                          Reset Filter
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mb-4 flex justify-between items-center">
                   <p className="text-gray-600">
                     Total data: <span className="font-bold">{roomsData.length}</span> ruangan
+                    {filteredRooms.length !== roomsData.length && (
+                      <span className="ml-2 text-blue-600">
+                        (Difilter: {filteredRooms.length} ruangan)
+                      </span>
+                    )}
                   </p>
-                  <button
-                    onClick={fetchRoomsData}
-                    disabled={isLoadingRooms}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    <Upload size={16} />
-                    {isLoadingRooms ? "Memuat..." : "Refresh Data"}
-                  </button>
                 </div>
 
                 {isLoadingRooms ? (
@@ -853,13 +1363,14 @@ export default function DashboardWithMap() {
                     <p className="mt-4 text-gray-600">Memuat data dari API...</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto border border-gray-200 rounded-lg flex">
-                    <table className="min-w-full divide-y divide-gray-200 flex">
+                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ruangan</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fakultas</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sub Unit</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lantai</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Gedung</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ukuran</th>
@@ -867,8 +1378,8 @@ export default function DashboardWithMap() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {roomsData.length > 0 ? (
-                          roomsData.map((room) => (
+                        {filteredRooms.length > 0 ? (
+                          filteredRooms.map((room) => (
                             <tr key={room.id} className="hover:bg-gray-50">
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                 {room.no}
@@ -878,6 +1389,9 @@ export default function DashboardWithMap() {
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {room.fk}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {room.subUnit || '-'}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {room.lantai}
@@ -892,6 +1406,7 @@ export default function DashboardWithMap() {
                                 <button
                                   onClick={() => setPopupRoomId(`room${room.no}`)}
                                   className="text-blue-600 hover:text-blue-900 mr-3"
+                                  disabled={apiStatus === 'offline'}
                                 >
                                   Edit
                                 </button>
@@ -908,13 +1423,16 @@ export default function DashboardWithMap() {
                                 <button
                                   onClick={async () => {
                                     if (!room.id || !confirm(`Hapus data ruangan ${room.ruangan}?`)) return;
-                                    const result = await apiService.deleteFakultasEkonomi(room.id);
-                                    if (result.success) {
-                                      fetchRoomsData();
-                                      alert('Data berhasil dihapus');
-                                    }
+                                    await handleApiOperation(async () => {
+                                      const result = await apiService.deleteFakultasEkonomi(room.id!);
+                                      if (result.success) {
+                                        fetchRoomsData();
+                                        alert('Data berhasil dihapus');
+                                      }
+                                    });
                                   }}
                                   className="text-red-600 hover:text-red-900"
+                                  disabled={apiStatus === 'offline'}
                                 >
                                   Hapus
                                 </button>
@@ -923,8 +1441,34 @@ export default function DashboardWithMap() {
                           ))
                         ) : (
                           <tr>
-                            <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                              Tidak ada data ruangan. Klik ruangan pada peta untuk menambah data.
+                            <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                              {roomsData.length === 0 ? (
+                                <div className="text-center">
+                                  <p className="text-gray-700 mb-2">
+                                    {apiStatus === 'offline' 
+                                      ? "Tidak dapat memuat data karena API sedang offline. Silakan coba lagi nanti." 
+                                      : "Tidak ada data ruangan. Klik ruangan pada peta untuk menambah data."}
+                                  </p>
+                                  {apiStatus === 'offline' && (
+                                    <button
+                                      onClick={() => checkApiStatus()}
+                                      className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                    >
+                                      Coba Koneksi Ulang
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-center">
+                                  <p className="text-gray-700 mb-2">Tidak ada data yang sesuai dengan filter</p>
+                                  <button
+                                    onClick={resetFilters}
+                                    className="text-blue-600 hover:text-blue-800 underline"
+                                  >
+                                    Reset filter untuk menampilkan semua data
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         )}
@@ -936,7 +1480,17 @@ export default function DashboardWithMap() {
             )}
             
             <footer className="mt-8 text-center py-6 text-gray-400 border-t border-gray-200">
-              © {new Date().getFullYear()} UNISBA - Sistem Denah Digital v1.0
+              © {new Date().getFullYear()} UNISSA - Sistem Denah Digital v1.0
+              <div className="text-xs mt-2 text-gray-500">
+                Status API: <span className={
+                  apiStatus === 'online' ? 'text-green-600 font-bold' :
+                  apiStatus === 'offline' ? 'text-red-600 font-bold' :
+                  'text-yellow-600 font-bold'
+                }>{apiStatus}</span>
+                {apiStatus === 'offline' && (
+                  <span className="ml-2 text-red-500">• Beberapa fitur mungkin terbatas</span>
+                )}
+              </div>
             </footer>
           </section>
         </div>
@@ -952,3 +1506,22 @@ export default function DashboardWithMap() {
     </div>
   );
 }
+
+// Komponen RefreshCw icon kecil (jika belum diimpor)
+const RefreshCw: React.FC<{ size: number }> = ({ size }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+  >
+    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+    <path d="M3 3v5h5"/>
+    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+    <path d="M21 21v-5h-5"/>
+  </svg>
+);
