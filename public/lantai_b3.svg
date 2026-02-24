@@ -2,11 +2,11 @@
 <svg width="2382" height="1684" viewBox="0 0 2382 1684" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
 <rect width="2382" height="1684" fill="url(#pattern0_541_25)" data-background="true" style="cursor: default; pointer-events: none;"/>
 <path d="M1527.5 1260.5H907.5L906 1265V1339L1490 1341L1535.5 1338L1561 1334L1584 1328.5L1611.5 1318L1631 1309.5L1655 1294.5L1611.5 1230.5L1563 1254L1527.5 1260.5Z" fill="#D9D9D9" fill-opacity="0.03" stroke="black" id="10110006" data-faculty="1011" data-processed="true" class="lainnya" opacity="0.03"/>
-<path d="M1297.56 1023L1289.56 1023.02L1289.5 996.517L1297.5 996.5L1297.56 1023Z" fill="#FF0000" stroke="black" id="10130015" data-faculty="1013" data-processed="true" class="ruangDosen"/>
-<path d="M977.5 1254.5V1246.5H1005.5V1254.5H977.5Z" fill="#FF0000" stroke="black" id="10130017" data-faculty="1013" data-processed="true" class="ruangDosen"/>
-<path d="M1005.5 1254.5V1246.5H1033.5V1254.5H1005.5Z" fill="#FF0000" stroke="black" id="10130013" data-faculty="1013" data-processed="true" class="ruangDosen"/>
-<path d="M1033.66 677.5L1039.79 677.545L1039.63 696.556L1033.5 696.511L1033.66 677.5Z" fill="#FF0000" stroke="black" id="10130016" data-faculty="1013" data-processed="true" class="ruangDosen"/>
-<path d="M1024.57 699.5L1030.7 699.515L1030.63 718.527L1024.5 718.512L1024.57 699.5Z" fill="#FF0000" stroke="black" id="10130014" data-faculty="1013" data-processed="true" class="ruangDosen"/>
+<path d="M1297.56 1023L1289.56 1023.02L1289.5 996.517L1297.5 996.5L1297.56 1023Z" fill="#FF0000" stroke="black" id="10130014" data-faculty="1013" data-processed="true" class="lainnya"/>
+<path d="M1116.07 1247.92L1116.1 1254.92L1089.1 1255.03L1089.07 1248.03L1116.07 1247.92Z" fill="#FF0000" stroke="black" id="10130013" data-faculty="1013" data-processed="true" class="lainnya"/>
+<path d="M1082.42 1244.04L1080.86 1241.85L1078.06 1239.67L1074.96 1239.07L1071.57 1239.73L1068.8 1241.32L1066.66 1244.17L1066.07 1247.64L1066.71 1250.16L1068.28 1252.66L1070.77 1254.84L1073.87 1256.08L1076.65 1256.05L1079.11 1254.77L1080.96 1253.5L1082.48 1251.28L1083.08 1248.76L1083.06 1246.56L1082.42 1244.04Z" fill="#FF0000" stroke="black" id="10130016" data-faculty="1013" data-processed="true" class="lainnya"/>
+<path d="M1032.82 669.151L1039.82 669.135L1039.88 696.135L1032.88 696.151L1032.82 669.151Z" fill="#FF0000" stroke="black" id="10130015" data-faculty="1013" data-processed="true" class="lainnya"/>
+<path d="M1028.32 648.706L1026.09 650.213L1023.84 652.956L1023.16 656.035L1023.73 659.446L1025.25 662.254L1028.05 664.467L1031.5 665.145L1034.03 664.571L1036.57 663.069L1038.82 660.635L1040.13 657.567L1040.18 654.785L1038.96 652.291L1037.74 650.415L1035.56 648.831L1033.05 648.17L1030.85 648.131L1028.32 648.706Z" fill="#FF0000" stroke="black" id="10130017" data-faculty="1013" data-processed="true" class="lainnya"/>
 <defs>
 <pattern id="pattern0_541_25" patternContentUnits="objectBoundingBox" width="1" height="1">
 <use xlink:href="#image0_541_25" transform="scale(0.000419815 0.000593824)"/>

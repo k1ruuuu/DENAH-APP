@@ -1,5 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="2382" height="1684" viewBox="0 0 2382 1684" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2382" height="1684" viewBox="0 0 2382 1684" fill="none">
 <rect width="2382" height="1684" fill="#F5F5F5" data-background="true" style="cursor: default; pointer-events: none;"/>
 <rect width="2382" height="1684" fill="url(#pattern0_27_2)" data-background="true" style="cursor: default; pointer-events: none;"/>
 <path d="M1442.25 887.301V881.301H1559.75V899.301H1569.75V912.301V982.301H1420.75V903.301H1425.25L1432.75 899.301L1438.25 893.801L1442.25 887.301Z" fill="#D9D9D9" fill-opacity="0.06" stroke="black" id="10030040" data-faculty="1003" data-processed="true" class="-" opacity="0.03"/>
@@ -57,9 +56,9 @@
 <path d="M536.754 883.301L480.754 832.801L451.754 866.801L456.754 872.801L451.754 878.801L500.254 925.801L536.754 883.301Z" fill="#D9D9D9" fill-opacity="0.06" stroke="black" id="10030029" data-faculty="1003" data-processed="true" class="ruangDosen" opacity="0.03"/>
 <path d="M568.754 914.801L531.254 954.301L578.254 998.301L584.754 992.301L591.754 998.301L597.254 992.301L594.254 989.301L620.254 961.801L568.754 914.801Z" fill="#D9D9D9" fill-opacity="0.06" stroke="black" id="10030028" data-faculty="1003" data-processed="true" class="ruangDosen" opacity="0.03"/>
 <path d="M1305.75 726.801V718.801H1332.75V726.801H1305.75Z" fill="#FF0000" stroke="black" id="10130023" data-faculty="1013" data-processed="true" class="-"/>
-<path d="M1332.75 726.801V718.801H1359.75V726.801H1332.75Z" fill="#FF0000" stroke="black" id="10130027" data-faculty="1013" data-processed="true" class="-"/>
+<path id="10130026" d="M976.222 671.46L978.4 669.879L980.56 667.063L981.14 663.962L980.457 660.573L978.839 657.816L975.971 655.698L972.499 655.135L969.991 655.793L967.497 657.378L965.333 659.886L964.123 662.996L964.167 665.778L965.465 668.23L966.754 670.064L968.982 671.575L971.51 672.153L973.713 672.118L976.222 671.46Z" fill="#FF0000" stroke="black"/>
 <path d="M973.754 705.305L965.754 705.301L965.77 679.89L973.77 679.894L973.754 705.305Z" fill="#FF0000" stroke="black" id="10130024" data-faculty="1013" data-processed="true" class="-"/>
-<path d="M973.754 679.415L965.754 679.411L965.77 654L973.77 654.004L973.754 679.415Z" fill="#FF0000" stroke="black" id="10130026" data-faculty="1013" data-processed="true" class="-"/>
+<path id="10130027" d="M1341.61 729.965L1343.15 732.172L1345.92 734.383L1349.01 735.02L1352.41 734.399L1355.2 732.832L1357.37 730.004L1358 726.543L1357.38 724.023L1355.85 721.5L1353.38 719.29L1350.29 718.023L1347.51 718.016L1345.03 719.269L1343.18 720.524L1341.62 722.724L1341 725.241L1340.99 727.444L1341.61 729.965Z" fill="#FF0000" stroke="black"/>
 <path d="M1149.82 556.301L1141.82 556.318L1141.75 529.818L1149.75 529.801L1149.82 556.301Z" fill="#FF0000" stroke="black" id="10130025" data-faculty="1013" data-processed="true" class="-"/>
 <path d="M798.5 640.5L784 657L818.5 690L863.5 640.5L828.5 608L824 613L826.5 616L801 642.5L798.5 640.5Z" stroke="black" id="10030037" data-faculty="1003" data-processed="true" class="ruangDosen" fill="#D9D9D9" opacity="0.03"/>
 <path d="M825 605.5L789 573.5L745.5 620.5L780.5 654.5L825 605.5Z" stroke="black" id="10030036" data-faculty="1003" data-processed="true" class="ruangDosen" fill="#D9D9D9" opacity="0.03"/>

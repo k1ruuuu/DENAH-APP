@@ -1,5 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="2382" height="1684" viewBox="0 0 2382 1684" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2382" height="1684" viewBox="0 0 2382 1684" fill="none">
 <rect width="2382" height="1684" fill="#F5F5F5" data-background="true" style="cursor: default; pointer-events: none;"/>
 <rect width="2382" height="1684" fill="url(#pattern0_48_2)" data-background="true" style="cursor: default; pointer-events: none;"/>
 <path d="M1355.64 889.819H1240.64V936.924H1264.73V968.819H1330.58V913.372V911.409H1334.02L1343.36 909.937L1347.78 906.502L1351.71 902.577L1353.68 899.142L1355.64 895.216V889.819Z" fill="#D9D9D9" fill-opacity="0.03" stroke="black" id="10010052" data-faculty="1001" data-processed="true" class="-" opacity="0.03"/>
@@ -59,9 +58,9 @@
 <path d="M611.644 707.356L650.724 664.819L704.644 713.787L664.575 756.819L611.644 707.356Z" fill="#D9D9D9" fill-opacity="0.03" stroke="black" id="10010026" data-faculty="1001" data-processed="true" class="ruangDosen" opacity="0.03"/>
 <path d="M681.667 631.301L653.644 662.915L705.756 711.819L741.644 673.289L694.94 629.819L688.058 636.735L681.667 631.301Z" fill="#D9D9D9" fill-opacity="0.03" stroke="black" id="10010027" data-faculty="1001" data-processed="true" class="ruangDosen" opacity="0.03"/>
 <path d="M1319.64 725.819V718.819H1346.64V725.819H1319.64Z" fill="#FF0000" stroke="black" id="10130018" data-faculty="1013" data-processed="true" class="-"/>
-<path d="M1346.64 725.819V718.819H1374.64V725.819H1346.64Z" fill="#FF0000" stroke="black" id="10130022" data-faculty="1013" data-processed="true" class="-"/>
+<path id="10130021" d="M991.866 671.279L994.045 669.698L996.204 666.882L996.785 663.781L996.101 660.392L994.483 657.635L991.616 655.517L988.143 654.954L985.635 655.612L983.141 657.197L980.977 659.705L979.767 662.815L979.811 665.596L981.11 668.049L982.398 669.883L984.626 671.393L987.154 671.972L989.358 671.937L991.866 671.279Z" fill="#FF0000" stroke="black"/>
 <path d="M989.105 709.528L981.233 709.546L981.175 683.451L989.047 683.433L989.105 709.528Z" fill="#FF0000" stroke="black" id="10130019" data-faculty="1013" data-processed="true" class="-"/>
-<path d="M989.044 682.434L981.172 682.451L981.111 656.356L988.983 656.339L989.044 682.434Z" fill="#FF0000" stroke="black" id="10130021" data-faculty="1013" data-processed="true" class="-"/>
+<path id="10130022" d="M1358.25 730.783L1359.79 732.991L1362.57 735.202L1365.66 735.839L1369.06 735.218L1371.84 733.651L1374.01 730.823L1374.64 727.362L1374.03 724.842L1372.49 722.319L1370.02 720.109L1366.94 718.842L1364.15 718.835L1361.68 720.088L1359.82 721.343L1358.27 723.543L1357.64 726.06L1357.64 728.263L1358.25 730.783Z" fill="#FF0000" stroke="black"/>
 <path d="M1165.11 557.391L1157.24 557.408L1157.18 531.312L1165.05 531.296L1165.11 557.391Z" fill="#FF0000" stroke="black" id="10130020" data-faculty="1013" data-processed="true" class="-"/>
 <defs>
 <pattern id="pattern0_48_2" patternContentUnits="objectBoundingBox" width="1" height="1">
