@@ -217,7 +217,7 @@ export default function LoginPage() {
   };
 
   const features = [
-    { icon: <Map className="h-5 w-5" />, text: "Denah 3D Interaktif", desc: "Navigasi real-time" },
+    { icon: <Map className="h-5 w-5" />, text: "Denah Interaktif", desc: "Navigasi real-time" },
     { icon: <Building className="h-5 w-5" />, text: "Navigasi Ruangan", desc: "Smart routing" },
     { icon: <Users className="h-5 w-5" />, text: "Manajemen Pengguna", desc: "Role-based access" },
     { icon: <MousePointerClick className="h-5 w-5" />, text: "Kontrol Real-time", desc: "Instant control" },
