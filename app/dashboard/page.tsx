@@ -32,12 +32,12 @@ import {
 import {
   getLantaiOptions, getFloorsByBuilding, getBuildingPath,
   getGedungFromPath, getLantaiFromPath, loadSvgContent,
-  extractErrorMessage, exportToJson,
+  extractErrorMessage, exportToJson, fetchAllFakultasRooms, deleteFakultasRoom,
 } from "@/utils";
 
 import type {
   FilterOptions, UserData, LoginActivityData, ActivityData,
-  AdminTable, SortField, SortDirection, UserModalMode,
+  AdminTable, SortField, SortDirection, UserModalMode, RoomWithSource,
 } from "@/types";
 
 // ============================================================
@@ -64,8 +64,8 @@ export default function DashboardWithMap() {
   const [popupRoomId, setPopupRoomId] = useState<string | null>(null);
 
   // --- Data State ---
-  const [roomsData, setRoomsData] = useState<RoomData[]>([]);
-  const [filteredRooms, setFilteredRooms] = useState<RoomData[]>([]);
+  const [roomsData, setRoomsData] = useState<RoomWithSource[]>([]);
+  const [filteredRooms, setFilteredRooms] = useState<RoomWithSource[]>([]);
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [stats, setStats] = useState<any>(null);
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({
@@ -220,8 +220,24 @@ export default function DashboardWithMap() {
 
   const fetchStatistics = async () => {
     try {
-      const result = await apiService.getStatistics();
-      if (result.success) setStats(result.data);
+      // Hitung statistik dari semua tabel fakultas
+      const allRooms = await fetchAllFakultasRooms();
+
+      const statistics = {
+        total_ruangan: allRooms.length,
+        gedung_count: new Set(allRooms.map((r) => r.gedung)).size,
+        lantai_distribution: {} as Record<number, number>,
+        fakultas_distribution: {} as Record<string, number>,
+      };
+
+      allRooms.forEach((room) => {
+        statistics.lantai_distribution[room.lantai] =
+          (statistics.lantai_distribution[room.lantai] || 0) + 1;
+        statistics.fakultas_distribution[room.fk] =
+          (statistics.fakultas_distribution[room.fk] || 0) + 1;
+      });
+
+      setStats(statistics);
     } catch (error) {
       console.error("Error fetching stats:", error);
     }
@@ -230,11 +246,10 @@ export default function DashboardWithMap() {
   const fetchRoomsData = async () => {
     setIsLoadingRooms(true);
     try {
-      const result = await apiService.getFakultasEkonomi();
-      if (result.success && result.data) {
-        setRoomsData(result.data);
-        setFilteredRooms(result.data);
-      }
+      // Ambil data dari semua tabel fakultas secara paralel
+      const allRooms = await fetchAllFakultasRooms();
+      setRoomsData(allRooms);
+      setFilteredRooms(allRooms);
     } catch (error) {
       console.error("Error fetching rooms:", error);
     } finally {
@@ -1271,7 +1286,8 @@ export default function DashboardWithMap() {
                                       onClick={async () => {
                                         if (!room.id || !confirm(`Hapus data ruangan ${room.ruangan}?`)) return;
                                         await handleApiOperation(async () => {
-                                          const result = await apiService.deleteFakultasEkonomi(room.id!);
+                                          // Gunakan tabel sumber yang benar berdasarkan _source
+                                          const result = await deleteFakultasRoom(room._source, room.id!);
                                           if (result.success) { fetchRoomsData(); alert("Data berhasil dihapus"); }
                                         });
                                       }}

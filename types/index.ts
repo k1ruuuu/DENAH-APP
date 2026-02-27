@@ -57,3 +57,28 @@ export type SortDirection = 'asc' | 'desc';
 export type RoleBadgeSize = 'sm' | 'md' | 'lg';
 export type StatCardColor = 'blue' | 'emerald' | 'amber' | 'purple';
 export type UserModalMode = 'create' | 'edit';
+
+// Key yang merepresentasikan setiap tabel fakultas di backend
+export type FakultasKey =
+  | 'fk_ekonomi'
+  | 'fk_syariah'
+  | 'fk_tarbiyah'
+  | 'fk_teknik'
+  | 'fk_hukum'
+  | 'fk_fikom';
+
+// RoomData yang sudah diberi tahu asalnya dari tabel mana
+export interface RoomWithSource {
+  id?: number;
+  no: number;
+  fk: string;
+  subUnit: string;
+  ruangan: string;
+  lantai: number;
+  gedung: string;
+  ukuranR?: number;
+  ket?: string;
+  created_at?: string;
+  // field tambahan untuk routing CRUD
+  _source: FakultasKey;
+}

@@ -12,8 +12,15 @@ import {
 import { apiService, MasterData } from "@/services/api";
 import { ResponsiveInput, ResponsiveSelect } from "@/components/ui/FormElements";
 import { GEDUNG_OPTIONS, UNIT_KERJA_OPTIONS } from "@/constants";
-import { getSubUnitsByFakultas } from "@/utils";
-import type { FormData } from "@/types";
+import {
+  getSubUnitsByFakultas,
+  getFakultasKey,
+  getFakultasRoomByNo,
+  createFakultasRoom,
+  updateFakultasRoom,
+  deleteFakultasRoom,
+} from "@/utils";
+import type { FormData, FakultasKey } from "@/types";
 
 // --- Props ---
 
@@ -36,6 +43,16 @@ const getScrollableHeightClass = (width: number): string => {
   return "max-h-[calc(80vh-180px)]";
 };
 
+// Semua tabel fakultas yang dicek saat load data berdasarkan nomor ruangan
+const ALL_FAKULTAS_KEYS: FakultasKey[] = [
+  "fk_ekonomi",
+  "fk_syariah",
+  "fk_tarbiyah",
+  "fk_teknik",
+  "fk_hukum",
+  "fk_fikom",
+];
+
 // --- Komponen Utama ---
 
 export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
@@ -53,6 +70,8 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [existingId, setExistingId] = useState<number | null>(null);
+  // Track dari tabel mana data ini berasal — untuk routing CRUD yang tepat
+  const [sourceKey, setSourceKey] = useState<FakultasKey>("fk_ekonomi");
   const [masterData, setMasterData] = useState<MasterData | null>(null);
   const [customSubUnit, setCustomSubUnit] = useState("");
   const [showCustomSubUnit, setShowCustomSubUnit] = useState(false);
@@ -92,6 +111,8 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
   }, []);
 
   // --- Load Room Data ---
+  // Cari data berdasarkan nomor ruangan di SEMUA tabel fakultas secara paralel.
+  // Tabel pertama yang mengembalikan data valid = sumber data ruangan ini.
   useEffect(() => {
     if (!roomId) return;
 
@@ -101,33 +122,55 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
         const no = parseInt(roomId.replace(/\D/g, ""));
         if (isNaN(no)) return;
 
-        const result = await apiService.getFakultasEkonomiByNo(no);
+        // Cari di semua tabel sekaligus
+        const results = await Promise.allSettled(
+          ALL_FAKULTAS_KEYS.map((key) => getFakultasRoomByNo(key, no))
+        );
 
-        if (result.success && result.data) {
-          const roomData = result.data;
-          setFormData({
-            no: roomData.no,
-            fk: roomData.fk,
-            subUnit: roomData.subUnit ?? "",
-            ruangan: roomData.ruangan,
-            lantai: roomData.lantai,
-            gedung: roomData.gedung,
-            ukuranR: roomData.ukuranR,
-            ket: roomData.ket ?? "",
-          });
+        let found = false;
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          const key = ALL_FAKULTAS_KEYS[i];
 
-          const predefined = getSubUnitsByFakultas(roomData.fk);
-          if (roomData.subUnit && !predefined.some((o) => o.value === roomData.subUnit)) {
-            setCustomSubUnit(roomData.subUnit);
-            setShowCustomSubUnit(true);
+          if (
+            result.status === "fulfilled" &&
+            result.value.success &&
+            result.value.data
+          ) {
+            const roomData = result.value.data;
+
+            setFormData({
+              no: roomData.no,
+              fk: roomData.fk,
+              subUnit: roomData.subUnit ?? "",
+              ruangan: roomData.ruangan,
+              lantai: roomData.lantai,
+              gedung: roomData.gedung,
+              ukuranR: roomData.ukuranR,
+              ket: roomData.ket ?? "",
+            });
+
+            // Tandai subUnit custom jika tidak ada di daftar predefined
+            const predefined = getSubUnitsByFakultas(roomData.fk);
+            if (roomData.subUnit && !predefined.some((o) => o.value === roomData.subUnit)) {
+              setCustomSubUnit(roomData.subUnit);
+              setShowCustomSubUnit(true);
+            }
+
+            setExistingId(roomData.id ?? null);
+            setSourceKey(key);         // ← simpan tabel sumber
+            setIsEditing(true);
+            found = true;
+            break; // stop setelah ketemu di tabel pertama
           }
+        }
 
-          setExistingId(roomData.id ?? null);
-          setIsEditing(true);
-        } else {
+        // Jika tidak ditemukan di mana pun = data baru
+        if (!found) {
           setFormData((prev) => ({ ...prev, no, ruangan: `Ruangan ${roomId}` }));
           setIsEditing(false);
           setExistingId(null);
+          setSourceKey("fk_ekonomi"); // default untuk data baru
         }
       } catch (error) {
         console.error("Error fetching room data:", error);
@@ -162,6 +205,11 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
     setFormData((prev) => ({ ...prev, fk: value, subUnit: "" }));
     setShowCustomSubUnit(false);
     setCustomSubUnit("");
+
+    // Saat user ganti fakultas pada data BARU, update sourceKey otomatis
+    if (!isEditing) {
+      setSourceKey(getFakultasKey(value));
+    }
   };
 
   const handleSubUnitChange = (value: string) => {
@@ -195,6 +243,7 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
     setFormData((prev) => ({ ...prev, subUnit: e.target.value }));
   };
 
+  // --- Submit: routing ke endpoint yang sesuai fakultas ---
   const handleSubmit = async () => {
     if (!formData.no || !formData.fk || !formData.ruangan || !formData.gedung) {
       alert("Harap isi semua field yang wajib!");
@@ -208,10 +257,17 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
         subUnit: showCustomSubUnit ? customSubUnit : formData.subUnit,
       };
 
+      // Tentukan tabel tujuan berdasarkan field `fk` yang dipilih user.
+      // Untuk edit: gunakan sourceKey (tabel asal). 
+      // Untuk create: gunakan key dari pilihan fk saat ini.
+      const targetKey: FakultasKey = isEditing
+        ? sourceKey
+        : getFakultasKey(formData.fk);
+
       const result =
         isEditing && existingId
-          ? await apiService.updateFakultasEkonomi(existingId, submitData)
-          : await apiService.createFakultasEkonomi(submitData);
+          ? await updateFakultasRoom(targetKey, existingId, submitData)
+          : await createFakultasRoom(targetKey, submitData);
 
       if (result.success) {
         alert(isEditing ? "Data berhasil diperbarui!" : "Data berhasil disimpan!");
@@ -227,12 +283,13 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
     }
   };
 
+  // --- Delete: routing ke endpoint yang sesuai tabel sumber ---
   const handleDelete = async () => {
     if (!existingId || !confirm("Apakah Anda yakin ingin menghapus data ini?")) return;
 
     setIsLoading(true);
     try {
-      const result = await apiService.deleteFakultasEkonomi(existingId);
+      const result = await deleteFakultasRoom(sourceKey, existingId);
       if (result.success) {
         alert("Data berhasil dihapus!");
         onClose();
@@ -272,7 +329,7 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
           <div className="flex items-center justify-between">
             <div className="flex-1 min-w-0">
               <h3 className="text-lg sm:text-xl font-bold text-white truncate">
-                {isEditing ? "Edit Data Ruangan" : "Edit Data Proteksi"}
+                {isEditing ? "Edit Data Ruangan" : "Tambah Data Ruangan"}
               </h3>
               <p className="text-blue-100 text-xs sm:text-sm mt-1 truncate">
                 {isEditing ? "Perbarui informasi ruangan" : "Tambahkan ruangan baru ke sistem"}
@@ -291,9 +348,15 @@ export const RoomPopup: React.FC<RoomPopupProps> = ({ roomId, onClose }) => {
               ID: <span className="font-mono font-bold">{roomId}</span>
             </div>
             {isEditing && (
-              <div className="bg-emerald-500/20 px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-emerald-100 text-xs">
-                Mode Edit
-              </div>
+              <>
+                <div className="bg-emerald-500/20 px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-emerald-100 text-xs">
+                  Mode Edit
+                </div>
+                {/* Tampilkan tabel sumber agar mudah di-debug */}
+                <div className="bg-white/10 px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-white/70 text-xs">
+                  Sumber: <span className="font-mono">{sourceKey}</span>
+                </div>
+              </>
             )}
           </div>
         </div>
