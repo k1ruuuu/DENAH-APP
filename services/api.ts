@@ -1,6 +1,7 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:9000/api/v1';
 
 // ========== INTERFACES ==========
+
 export interface LoginRequest {
   username: string;
   password: string;
@@ -32,7 +33,6 @@ export interface UserInfo {
   role: string;
 }
 
-
 export interface RoomData {
   id?: number;
   no: number;
@@ -63,13 +63,50 @@ export interface UserCreate {
 }
 
 export interface UserUpdate {
-  username: string;
-  name: string;
-  password: string;
-  role: string;
+  username?: string;
+  name?: string;
+  password?: string;
+  role?: string;
 }
 
+// ========== HYDRANT & APAR INTERFACE ==========
 
+export type ProteksiType = 'Hydrant' | 'APAR';
+export type ProteksiStatus = 'Aktif' | 'Tidak Aktif' | 'Dalam Perbaikan';
+
+export interface HydrantAparData {
+  id?: number;
+  no: string;
+  Proteksi: ProteksiType;
+  Lantai: string;
+  Gedung: string;
+  Kapasitas?: string;
+  Tekanan?: string;
+  Keterangan?: string;
+  Status?: ProteksiStatus;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface HydrantAparFilters {
+  proteksi?: ProteksiType | '';
+  gedung?: string;
+  lantai?: string;
+  status?: ProteksiStatus | '';
+}
+
+export interface HydrantAparStats {
+  total: number;
+  hydrant_count: number;
+  apar_count: number;
+  aktif_count: number;
+  tidak_aktif_count: number;
+  perbaikan_count: number;
+  gedung_distribution: Record<string, number>;
+  lantai_distribution: Record<string, number>;
+}
+
+// ========== LAINNYA ==========
 
 export interface MasterData {
   fakultas: Array<{ value: string; label: string }>;
@@ -95,270 +132,163 @@ export interface StatisticsData {
   gedung_count: number;
   lantai_distribution: Record<number, number>;
   fakultas_distribution: Record<string, number>;
+  // Tambahan: stats proteksi
+  total_proteksi?: number;
+  hydrant_count?: number;
+  apar_count?: number;
 }
+
+// ============================================================
+// AUTH SERVICE
+// ============================================================
+
 class AuthService {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
   private userInfo: UserInfo | null = null;
 
   constructor() {
-    // Load tokens from localStorage on initialization
     if (typeof window !== 'undefined') {
       this.accessToken = localStorage.getItem('access_token');
       this.refreshToken = localStorage.getItem('refresh_token');
       const userInfoStr = localStorage.getItem('user_info');
       if (userInfoStr) {
-        this.userInfo = JSON.parse(userInfoStr);
+        try { this.userInfo = JSON.parse(userInfoStr); } catch { /**/ }
       }
     }
   }
 
-  // Helper untuk menyimpan token
   private saveTokens(accessToken: string, refreshToken: string, userInfo: UserInfo) {
     this.accessToken = accessToken;
     this.refreshToken = refreshToken;
     this.userInfo = userInfo;
-    
     if (typeof window !== 'undefined') {
       localStorage.setItem('access_token', accessToken);
       localStorage.setItem('refresh_token', refreshToken);
       localStorage.setItem('user_info', JSON.stringify(userInfo));
       localStorage.setItem('isLoggedIn', 'true');
-      localStorage.setItem('user_role', userInfo.role); // Simpan role secara terpisah
+      localStorage.setItem('user_role', userInfo.role);
     }
   }
 
-  // Helper untuk menghapus token
   clearTokens() {
     this.accessToken = null;
     this.refreshToken = null;
     this.userInfo = null;
-    
     if (typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       localStorage.removeItem('user_info');
       localStorage.removeItem('isLoggedIn');
-      localStorage.removeItem('user_role'); // Hapus role juga
+      localStorage.removeItem('user_role');
     }
   }
 
   getUserRole(): string | null {
-  if (this.userInfo?.role) {
-    return this.userInfo.role;
-  }
-  
-  if (typeof window !== 'undefined') {
-    const role = localStorage.getItem('user_role');
-    if (role) {
-      return role;
+    if (this.userInfo?.role) return this.userInfo.role;
+    if (typeof window !== 'undefined') {
+      const role = localStorage.getItem('user_role');
+      if (role) return role;
+      const str = localStorage.getItem('user_info');
+      if (str) {
+        try { return JSON.parse(str).role || null; } catch { /**/ }
+      }
     }
-    
-    // Fallback: cek dari user_info
-    const userInfoStr = localStorage.getItem('user_info');
-    if (userInfoStr) {
-      const userInfo = JSON.parse(userInfoStr);
-      return userInfo.role || null;
-    }
+    return null;
   }
-  
-  return null;
-}
 
-isAdmin(): boolean {
-  const role = this.getUserRole();
-  return role === 'admin';
-}
+  isAdmin(): boolean { return this.getUserRole() === 'admin'; }
+  isUser(): boolean { const r = this.getUserRole(); return r === 'user' || r === 'viewer'; }
+  hasRole(r: string): boolean { return this.getUserRole() === r; }
 
-isUser(): boolean {
-  const role = this.getUserRole();
-  return role === 'user' || role === 'viewer';
-}
-
-hasRole(requiredRole: string): boolean {
-  const role = this.getUserRole();
-  return role === requiredRole;
-}
-
-
-
-  // Get headers with auth token
   getAuthHeaders(): HeadersInit {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-    };
-    
-    if (this.accessToken) {
-      headers['Authorization'] = `Bearer ${this.accessToken}`;
-    }
-    
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    if (this.accessToken) headers['Authorization'] = `Bearer ${this.accessToken}`;
     return headers;
   }
-async login(username: string, password: string): Promise<ApiResponse<LoginResponse>> {
+
+  async login(username: string, password: string): Promise<ApiResponse<LoginResponse>> {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
-
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Login failed');
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || 'Login failed');
       }
-
       const data: LoginResponse = await response.json();
-      
-      // Save tokens and user info
-      const userInfo: UserInfo = {
-        id: data.user_id,
-        username: data.username,
-        name: data.name,
-        role: data.role,
-      };
-      
-      this.saveTokens(data.access_token, data.refresh_token, userInfo);
-      
+      this.saveTokens(data.access_token, data.refresh_token, {
+        id: data.user_id, username: data.username, name: data.name, role: data.role,
+      });
       return { success: true, data };
     } catch (error) {
-      console.error('Login error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Login failed',
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Login failed' };
     }
   }
 
-  // Refresh token function
   async _refreshToken(): Promise<ApiResponse<RefreshTokenResponse>> {
-    if (!this.refreshToken) {
-      return { success: false, error: 'No refresh token available' };
-    }
-
+    if (!this.refreshToken) return { success: false, error: 'No refresh token available' };
     try {
       const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: this.refreshToken }),
       });
-
-      if (!response.ok) {
-        // If refresh fails, clear tokens (force re-login)
-        this.clearTokens();
-        throw new Error('Refresh token expired or invalid');
-      }
-
+      if (!response.ok) { this.clearTokens(); throw new Error('Refresh token expired or invalid'); }
       const data: RefreshTokenResponse = await response.json();
       this.accessToken = data.access_token;
-      
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('access_token', data.access_token);
-      }
-      
+      if (typeof window !== 'undefined') localStorage.setItem('access_token', data.access_token);
       return { success: true, data };
     } catch (error) {
-      console.error('Refresh token error:', error);
       this.clearTokens();
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to refresh token',
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to refresh token' };
     }
   }
 
-  // Logout function
   async logout(): Promise<ApiResponse<{ message: string }>> {
     try {
       if (this.accessToken) {
-        const response = await fetch(`${API_BASE_URL}/auth/logout`, {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-        });
-
-        if (!response.ok) {
-          console.warn('Logout API call failed, but clearing local tokens anyway');
-        }
+        await fetch(`${API_BASE_URL}/auth/logout`, { method: 'POST', headers: this.getAuthHeaders() });
       }
-      
       this.clearTokens();
       return { success: true, data: { message: 'Logout successful' } };
     } catch (error) {
-      console.error('Logout error:', error);
-      this.clearTokens(); // Clear tokens even if API call fails
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Logout failed',
-      };
+      this.clearTokens();
+      return { success: false, error: error instanceof Error ? error.message : 'Logout failed' };
     }
   }
 
-  // Get current user info
   async getCurrentUser(): Promise<ApiResponse<UserInfo>> {
     try {
-      if (!this.accessToken) {
-        return { success: false, error: 'Not authenticated' };
-      }
-
-      const response = await fetch(`${API_BASE_URL}/auth/me`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(),
-      });
-
+      if (!this.accessToken) return { success: false, error: 'Not authenticated' };
+      const response = await fetch(`${API_BASE_URL}/auth/me`, { headers: this.getAuthHeaders() });
       if (response.status === 401) {
-        // Token expired, try to refresh
-        const refreshResult = await this._refreshToken();
-        if (refreshResult.success) {
-          // Retry with new token
-          return this.getCurrentUser();
-        } else {
-          this.clearTokens();
-          return { success: false, error: 'Session expired, please login again' };
-        }
+        const r = await this._refreshToken();
+        if (r.success) return this.getCurrentUser();
+        this.clearTokens();
+        return { success: false, error: 'Session expired, please login again' };
       }
-
-      if (!response.ok) {
-        throw new Error('Failed to get user info');
-      }
-
+      if (!response.ok) throw new Error('Failed to get user info');
       const data: UserInfo = await response.json();
       this.userInfo = data;
-      
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('user_info', JSON.stringify(data));
-      }
-      
+      if (typeof window !== 'undefined') localStorage.setItem('user_info', JSON.stringify(data));
       return { success: true, data };
     } catch (error) {
-      console.error('Get current user error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to get user info',
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get user info' };
     }
   }
 
-  // Check if user is authenticated
-  isAuthenticated(): boolean {
-    return !!this.accessToken;
-  }
-
-  // Get current user info
-  getUserInfo(): UserInfo | null {
-    return this.userInfo;
-  }
-
-  // Get access token
-  getAccessToken(): string | null {
-    return this.accessToken;
-  }
+  isAuthenticated(): boolean { return !!this.accessToken; }
+  getUserInfo(): UserInfo | null { return this.userInfo; }
+  getAccessToken(): string | null { return this.accessToken; }
 }
 
+// ============================================================
+// API SERVICE
+// ============================================================
 
-// ========== API SERVICE ==========
 class ApiService {
   private authService: AuthService;
 
@@ -366,63 +296,43 @@ class ApiService {
     this.authService = new AuthService();
   }
 
-  private headers = {
-    'Content-Type': 'application/json',
-  };
-
-  // Helper untuk fetch dengan error handling
+  // ---- Core fetch helper ----
   private async fetchWithAuth<T>(
     endpoint: string,
     options: RequestInit = {},
-    retryOnUnauthorized: boolean = true
-
+    retryOnUnauthorized = true,
   ): Promise<ApiResponse<T>> {
     try {
       const headers = {
         'Content-Type': 'application/json',
         ...this.authService.getAuthHeaders(),
         ...options.headers,
-
       };
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        ...options,
-        headers,
-      });
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
 
       if (response.status === 401 && retryOnUnauthorized) {
-        // Try to refresh token
         const refreshResult = await this.authService._refreshToken();
-        if (refreshResult.success) {
-          // Retry the original request with new token
-          return this.fetchWithAuth(endpoint, options, false);
-        } else {
-          // Refresh failed, clear tokens
-          this.authService.clearTokens();
-          throw new Error('Session expired, please login again');
-        }
+        if (refreshResult.success) return this.fetchWithAuth(endpoint, options, false);
+        this.authService.clearTokens();
+        throw new Error('Session expired, please login again');
       }
-
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP ${response.status}`);
+        throw new Error(errorData.detail || errorData.message || `HTTP ${response.status}`);
       }
 
       const data = await response.json();
       return { success: true, data };
     } catch (error) {
-      console.error('API Error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
+      console.error(`API Error [${endpoint}]:`, error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 
   get auth() {
     return {
-      login: (username: string, password: string) => 
-        this.authService.login(username, password),
+      login: (u: string, p: string) => this.authService.login(u, p),
       logout: () => this.authService.logout(),
       getCurrentUser: () => this.authService.getCurrentUser(),
       isAuthenticated: () => this.authService.isAuthenticated(),
@@ -431,602 +341,374 @@ class ApiService {
     };
   }
 
-  // Keep existing methods, they will now use fetchWithAuth
+  // ============================================================
+  // ========== HYDRANT & APAR ==========
+  // ============================================================
 
+  /**
+   * Ambil semua data Hydrant & APAR dengan filter opsional.
+   * Endpoint: GET /hydrantApar
+   */
+  async getHydrantApar(
+    skip = 0,
+    limit = 1000,
+    filters?: HydrantAparFilters,
+  ): Promise<ApiResponse<HydrantAparData[]>> {
+    let query = `/hydrantApar?skip=${skip}&limit=${limit}`;
+    if (filters?.proteksi) query += `&Proteksi=${encodeURIComponent(filters.proteksi)}`;
+    if (filters?.gedung)   query += `&Gedung=${encodeURIComponent(filters.gedung)}`;
+    if (filters?.lantai)   query += `&Lantai=${encodeURIComponent(filters.lantai)}`;
+    if (filters?.status)   query += `&Status=${encodeURIComponent(filters.status)}`;
+    return this.fetchWithAuth<HydrantAparData[]>(query);
+  }
+
+  /**
+   * Ambil satu data Hydrant/APAR berdasarkan ID.
+   * Endpoint: GET /hydrantApar/{id}
+   */
+  async getHydrantAparById(id: number): Promise<ApiResponse<HydrantAparData>> {
+    return this.fetchWithAuth<HydrantAparData>(`/hydrantApar/${id}`);
+  }
+
+  /**
+   * Ambil satu data Hydrant/APAR berdasarkan nomor alat.
+   * Endpoint: GET /hydrantApar/no/{no}
+   */
+  async getHydrantAparByNo(no: string): Promise<ApiResponse<HydrantAparData>> {
+    return this.fetchWithAuth<HydrantAparData>(`/hydrantApar/no/${encodeURIComponent(no)}`);
+  }
+
+  /**
+   * Tambah data Hydrant/APAR baru.
+   * Endpoint: POST /hydrantApar
+   */
+  async createHydrantApar(
+    data: Omit<HydrantAparData, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ApiResponse<HydrantAparData>> {
+    return this.fetchWithAuth<HydrantAparData>('/hydrantApar', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update data Hydrant/APAR berdasarkan ID.
+   * Endpoint: PUT /hydrantApar/{id}
+   */
+  async updateHydrantApar(
+    id: number,
+    data: Partial<Omit<HydrantAparData, 'id' | 'created_at' | 'updated_at'>>,
+  ): Promise<ApiResponse<HydrantAparData>> {
+    return this.fetchWithAuth<HydrantAparData>(`/hydrantApar/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Hapus data Hydrant/APAR berdasarkan ID.
+   * Endpoint: DELETE /hydrantApar/{id}
+   */
+  async deleteHydrantApar(id: number): Promise<ApiResponse<{ message: string }>> {
+    return this.fetchWithAuth<{ message: string }>(`/hydrantApar/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Hitung statistik Hydrant & APAR secara lokal dari data yang di-fetch.
+   * Digunakan untuk dashboard summary tanpa perlu endpoint tambahan di backend.
+   */
+  async getHydrantAparStats(): Promise<ApiResponse<HydrantAparStats>> {
+    const result = await this.getHydrantApar(0, 10000);
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error ?? 'Failed to fetch hydrant/apar data' };
+    }
+
+    const data = result.data;
+    const stats: HydrantAparStats = {
+      total: data.length,
+      hydrant_count: data.filter(d => d.Proteksi === 'Hydrant').length,
+      apar_count: data.filter(d => d.Proteksi === 'APAR').length,
+      aktif_count: data.filter(d => (d.Status ?? 'Aktif') === 'Aktif').length,
+      tidak_aktif_count: data.filter(d => d.Status === 'Tidak Aktif').length,
+      perbaikan_count: data.filter(d => d.Status === 'Dalam Perbaikan').length,
+      gedung_distribution: {},
+      lantai_distribution: {},
+    };
+
+    data.forEach(d => {
+      stats.gedung_distribution[d.Gedung] = (stats.gedung_distribution[d.Gedung] ?? 0) + 1;
+      stats.lantai_distribution[d.Lantai] = (stats.lantai_distribution[d.Lantai] ?? 0) + 1;
+    });
+
+    return { success: true, data: stats };
+  }
+
+  // ============================================================
+  // ========== FAKULTAS ENDPOINTS ==========
+  // ============================================================
+
+  async getFakultasEkonomi(skip = 0, limit = 100, filters?: { gedung?: string; lantai?: number; fk?: string }): Promise<ApiResponse<RoomData[]>> {
+    let query = `/fk_ekonomi?skip=${skip}&limit=${limit}`;
+    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
+    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
+    if (filters?.fk)     query += `&fk=${encodeURIComponent(filters.fk)}`;
+    return this.fetchWithAuth<RoomData[]>(query);
+  }
+  async getFakultasEkonomiById(id: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_ekonomi/${id}`); }
+  async getFakultasEkonomiByNo(no: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_ekonomi/no/${no}`); }
+  async createFakultasEkonomi(d: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>('/fk_ekonomi', { method: 'POST', body: JSON.stringify(d) }); }
+  async updateFakultasEkonomi(id: number, d: Partial<RoomData>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_ekonomi/${id}`, { method: 'PUT', body: JSON.stringify(d) }); }
+  async deleteFakultasEkonomi(id: number): Promise<ApiResponse<{ message: string }>> { return this.fetchWithAuth<{ message: string }>(`/fk_ekonomi/${id}`, { method: 'DELETE' }); }
+
+  async getFakultasSyariah(skip = 0, limit = 100, filters?: { gedung?: string; lantai?: number; fk?: string }): Promise<ApiResponse<RoomData[]>> {
+    let query = `/fk_syariah?skip=${skip}&limit=${limit}`;
+    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
+    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
+    if (filters?.fk)     query += `&fk=${encodeURIComponent(filters.fk)}`;
+    return this.fetchWithAuth<RoomData[]>(query);
+  }
+  async getFakultasSyariahById(id: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_syariah/${id}`); }
+  async getFakultasSyariahByNo(no: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_syariah/no/${no}`); }
+  async createFakultasSyariah(d: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>('/fk_syariah', { method: 'POST', body: JSON.stringify(d) }); }
+  async updateFakultasSyariah(id: number, d: Partial<RoomData>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_syariah/${id}`, { method: 'PUT', body: JSON.stringify(d) }); }
+  async deleteFakultasSyariah(id: number): Promise<ApiResponse<{ message: string }>> { return this.fetchWithAuth<{ message: string }>(`/fk_syariah/${id}`, { method: 'DELETE' }); }
+
+  async getFakultasTarbiyah(skip = 0, limit = 100, filters?: { gedung?: string; lantai?: number; fk?: string }): Promise<ApiResponse<RoomData[]>> {
+    let query = `/fk_tarbiyah?skip=${skip}&limit=${limit}`;
+    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
+    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
+    if (filters?.fk)     query += `&fk=${encodeURIComponent(filters.fk)}`;
+    return this.fetchWithAuth<RoomData[]>(query);
+  }
+  async getFakultasTarbiyahById(id: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_tarbiyah/${id}`); }
+  async getFakultasTarbiyahByNo(no: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_tarbiyah/no/${no}`); }
+  async createFakultasTarbiyah(d: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>('/fk_tarbiyah', { method: 'POST', body: JSON.stringify(d) }); }
+  async updateFakultasTarbiyah(id: number, d: Partial<RoomData>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_tarbiyah/${id}`, { method: 'PUT', body: JSON.stringify(d) }); }
+  async deleteFakultasTarbiyah(id: number): Promise<ApiResponse<{ message: string }>> { return this.fetchWithAuth<{ message: string }>(`/fk_tarbiyah/${id}`, { method: 'DELETE' }); }
+
+  async getFakultasTeknik(skip = 0, limit = 100, filters?: { gedung?: string; lantai?: number; fk?: string }): Promise<ApiResponse<RoomData[]>> {
+    let query = `/fk_teknik?skip=${skip}&limit=${limit}`;
+    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
+    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
+    if (filters?.fk)     query += `&fk=${encodeURIComponent(filters.fk)}`;
+    return this.fetchWithAuth<RoomData[]>(query);
+  }
+  async getFakultasTeknikById(id: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_teknik/${id}`); }
+  async getFakultasTeknikByNo(no: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_teknik/no/${no}`); }
+  async createFakultasTeknik(d: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>('/fk_teknik', { method: 'POST', body: JSON.stringify(d) }); }
+  async updateFakultasTeknik(id: number, d: Partial<RoomData>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_teknik/${id}`, { method: 'PUT', body: JSON.stringify(d) }); }
+  async deleteFakultasTeknik(id: number): Promise<ApiResponse<{ message: string }>> { return this.fetchWithAuth<{ message: string }>(`/fk_teknik/${id}`, { method: 'DELETE' }); }
+
+  async getFakultasFikom(skip = 0, limit = 100, filters?: { gedung?: string; lantai?: number; fk?: string }): Promise<ApiResponse<RoomData[]>> {
+    let query = `/fk_fikom?skip=${skip}&limit=${limit}`;
+    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
+    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
+    if (filters?.fk)     query += `&fk=${encodeURIComponent(filters.fk)}`;
+    return this.fetchWithAuth<RoomData[]>(query);
+  }
+  async getFakultasFikomById(id: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_fikom/${id}`); }
+  async getFakultasFikomByNo(no: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_fikom/no/${no}`); }
+  async createFakultasFikom(d: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>('/fk_fikom', { method: 'POST', body: JSON.stringify(d) }); }
+  async updateFakultasFikom(id: number, d: Partial<RoomData>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_fikom/${id}`, { method: 'PUT', body: JSON.stringify(d) }); }
+  async deleteFakultasFikom(id: number): Promise<ApiResponse<{ message: string }>> { return this.fetchWithAuth<{ message: string }>(`/fk_fikom/${id}`, { method: 'DELETE' }); }
+
+  async getFakultasHukum(skip = 0, limit = 100, filters?: { gedung?: string; lantai?: number; fk?: string }): Promise<ApiResponse<RoomData[]>> {
+    let query = `/fk_hukum?skip=${skip}&limit=${limit}`;
+    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
+    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
+    if (filters?.fk)     query += `&fk=${encodeURIComponent(filters.fk)}`;
+    return this.fetchWithAuth<RoomData[]>(query);
+  }
+  async getFakultasHukumById(id: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_hukum/${id}`); }
+  async getFakultasHukumByNo(no: number): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_hukum/no/${no}`); }
+  async createFakultasHukum(d: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>('/fk_hukum', { method: 'POST', body: JSON.stringify(d) }); }
+  async updateFakultasHukum(id: number, d: Partial<RoomData>): Promise<ApiResponse<RoomData>> { return this.fetchWithAuth<RoomData>(`/fk_hukum/${id}`, { method: 'PUT', body: JSON.stringify(d) }); }
+  async deleteFakultasHukum(id: number): Promise<ApiResponse<{ message: string }>> { return this.fetchWithAuth<{ message: string }>(`/fk_hukum/${id}`, { method: 'DELETE' }); }
+
+  // ============================================================
+  // ========== USERS ==========
+  // ============================================================
 
   async getUserById(id: number): Promise<ApiResponse<UserData>> {
     return this.fetchWithAuth<UserData>(`/users/${id}`);
   }
 
-
-  // ========== FAKULTAS ENDPOINTS ==========
-  async getFakultasEkonomi(
-    skip: number = 0,
-    limit: number = 100,
-    filters?: { gedung?: string; lantai?: number; fk?: string }
-  ): Promise<ApiResponse<RoomData[]>> {
-    let query = `/fk_ekonomi?skip=${skip}&limit=${limit}`;
-    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
-    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
-    if (filters?.fk) query += `&fk=${encodeURIComponent(filters.fk)}`;
-    
-    return this.fetchWithAuth<RoomData[]>(query);
-  }
-
-  async getFakultasEkonomiById(id: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_ekonomi/${id}`);
-  }
-
-  async getFakultasEkonomiByNo(no: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_ekonomi/no/${no}`);
-  }
-
-  async createFakultasEkonomi(roomData: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>('/fk_ekonomi', {
-      method: 'POST',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async updateFakultasEkonomi(id: number, roomData: Partial<RoomData>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_ekonomi/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async deleteFakultasEkonomi(id: number): Promise<ApiResponse<{ message: string }>> {
-    return this.fetchWithAuth<{ message: string }>(`/fk_ekonomi/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async getFakultasSyariah(
-    skip: number = 0,
-    limit: number = 100,
-    filters?: { gedung?: string; lantai?: number; fk?: string }
-  ): Promise<ApiResponse<RoomData[]>> {
-    let query = `/fk_syariah?skip=${skip}&limit=${limit}`;
-    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
-    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
-    if (filters?.fk) query += `&fk=${encodeURIComponent(filters.fk)}`;
-    
-    return this.fetchWithAuth<RoomData[]>(query);
-  }
-
-  async getFakultasSyariahById(id: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_syariah/${id}`);
-  }
-
-  async getFakultasSyariahByNo(no: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_syariah/no/${no}`);
-  }
-
-  async createFakultasSyariah(roomData: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>('/fk_syariah', {
-      method: 'POST',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async updateFakultasSyariah(id: number, roomData: Partial<RoomData>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_syariah/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async deleteFakultasSyariah(id: number): Promise<ApiResponse<{ message: string }>> {
-    return this.fetchWithAuth<{ message: string }>(`/fk_syariah/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-// Di dalam class ApiService, perbaiki semua method yang memanggil this.getToken()
-
-async getUsers(skip: number = 0, limit: number = 100, includeStats: boolean = false): Promise<{
-    success: boolean;
-    data?: UserData[];
-    stats?: UserStats;
-    error?: string;
+  async getUsers(skip = 0, limit = 100, includeStats = false): Promise<{
+    success: boolean; data?: UserData[]; stats?: UserStats; error?: string;
   }> {
     try {
-      // Gunakan this.authService.getAccessToken() bukan this.getToken()
       const token = this.authService.getAccessToken();
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
-      const url = includeStats 
-        ? `${API_BASE_URL}/users/?skip=${skip}&limit=${limit}&include_stats=true`  // Gunakan API_BASE_URL, bukan this.baseUrl
+      if (!token) return { success: false, error: 'No authentication token' };
+      const url = includeStats
+        ? `${API_BASE_URL}/users/?skip=${skip}&limit=${limit}&include_stats=true`
         : `${API_BASE_URL}/users/?skip=${skip}&limit=${limit}`;
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
+      const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } });
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to fetch users: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to fetch users: ${response.status}` };
       }
-
-      const data = await response.json();
-      return { success: true, data };
+      return { success: true, data: await response.json() };
     } catch (error) {
-      console.error('Error fetching users:', error);
       return { success: false, error: 'Network error while fetching users' };
     }
   }
 
-  async getUserStats(): Promise<{
-    success: boolean;
-    data?: UserStats;
-    error?: string;
-  }> {
+  async getUserStats(): Promise<{ success: boolean; data?: UserStats; error?: string }> {
     try {
       const token = this.authService.getAccessToken();
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
-      const response = await fetch(`${API_BASE_URL}/users/stats`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
+      if (!token) return { success: false, error: 'No authentication token' };
+      const response = await fetch(`${API_BASE_URL}/users/stats`, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } });
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to fetch user stats: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to fetch user stats: ${response.status}` };
       }
-
       const data = await response.json();
       return { success: true, data: data.stats };
     } catch (error) {
-      console.error('Error fetching user stats:', error);
       return { success: false, error: 'Network error while fetching user stats' };
     }
   }
 
-  async createUser(userData: UserCreate): Promise<{
-    success: boolean;
-    data?: UserData;
-    error?: string;
-  }> {
+  async createUser(userData: UserCreate): Promise<{ success: boolean; data?: UserData; error?: string }> {
     try {
-      const token = this.authService.getAccessToken(); // Pastikan ini benar
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
-      console.log('🔑 Using token:', token.substring(0, 20) + '...');
-
+      const token = this.authService.getAccessToken();
+      if (!token) return { success: false, error: 'No authentication token' };
       const response = await fetch(`${API_BASE_URL}/users/`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(userData),
       });
-
-      console.log('📡 Response status:', response.status);
-
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('❌ Error response:', errorData);
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to create user: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to create user: ${response.status}` };
       }
-
-      const data = await response.json();
-      console.log('✅ Success response:', data);
-      return { success: true, data };
+      return { success: true, data: await response.json() };
     } catch (error) {
-      console.error('🔥 Network error in createUser:', error);
       return { success: false, error: 'Network error while creating user' };
     }
   }
 
-  async updateUser(userId: number, userData: UserUpdate): Promise<{
-    success: boolean;
-    data?: UserData;
-    error?: string;
-  }> {
+  async updateUser(userId: number, userData: Partial<UserUpdate>): Promise<{ success: boolean; data?: UserData; error?: string }> {
     try {
       const token = this.authService.getAccessToken();
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
+      if (!token) return { success: false, error: 'No authentication token' };
       const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(userData),
       });
-
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to update user: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to update user: ${response.status}` };
       }
-
-      const data = await response.json();
-      return { success: true, data };
+      return { success: true, data: await response.json() };
     } catch (error) {
-      console.error('Error updating user:', error);
       return { success: false, error: 'Network error while updating user' };
     }
   }
 
-  async deleteUser(userId: number): Promise<{
-    success: boolean;
-    message?: string;
-    error?: string;
-  }> {
+  async deleteUser(userId: number): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
       const token = this.authService.getAccessToken();
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
+      if (!token) return { success: false, error: 'No authentication token' };
       const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
-
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to delete user: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to delete user: ${response.status}` };
       }
-
       const data = await response.json();
       return { success: true, message: data.message };
     } catch (error) {
-      console.error('Error deleting user:', error);
       return { success: false, error: 'Network error while deleting user' };
     }
   }
 
-  async resetUserPassword(userId: number, newPassword: string): Promise<{
-    success: boolean;
-    message?: string;
-    error?: string;
-  }> {
+  async resetUserPassword(userId: number, newPassword: string): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
       const token = this.authService.getAccessToken();
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
+      if (!token) return { success: false, error: 'No authentication token' };
       const response = await fetch(`${API_BASE_URL}/users/${userId}/reset-password?new_password=${encodeURIComponent(newPassword)}`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
-
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to reset password: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to reset password: ${response.status}` };
       }
-
       const data = await response.json();
       return { success: true, message: data.message };
     } catch (error) {
-      console.error('Error resetting password:', error);
       return { success: false, error: 'Network error while resetting password' };
     }
   }
 
-  // ==================== USER PROFILE (SELF SERVICE) ====================
-  
-  async getCurrentUser(): Promise<{
-    success: boolean;
-    data?: UserData;
-    error?: string;
-  }> {
+  async getCurrentUser(): Promise<{ success: boolean; data?: UserData; error?: string }> {
     try {
       const token = this.authService.getAccessToken();
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
-      const response = await fetch(`${API_BASE_URL}/users/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
+      if (!token) return { success: false, error: 'No authentication token' };
+      const response = await fetch(`${API_BASE_URL}/users/me`, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } });
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to fetch user profile: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to fetch user profile: ${response.status}` };
       }
-
-      const data = await response.json();
-      return { success: true, data };
+      return { success: true, data: await response.json() };
     } catch (error) {
-      console.error('Error fetching user profile:', error);
       return { success: false, error: 'Network error while fetching user profile' };
     }
   }
 
-  async updateCurrentUser(updateData: { name?: string; password?: string }): Promise<{
-    success: boolean;
-    data?: UserData;
-    error?: string;
-  }> {
+  async updateCurrentUser(updateData: { name?: string; password?: string }): Promise<{ success: boolean; data?: UserData; error?: string }> {
     try {
       const token = this.authService.getAccessToken();
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
+      if (!token) return { success: false, error: 'No authentication token' };
       const response = await fetch(`${API_BASE_URL}/users/me`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(updateData),
       });
-
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to update profile: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to update profile: ${response.status}` };
       }
-
-      const data = await response.json();
-      return { success: true, data };
+      return { success: true, data: await response.json() };
     } catch (error) {
-      console.error('Error updating profile:', error);
       return { success: false, error: 'Network error while updating profile' };
     }
   }
 
-  async changePassword(oldPassword: string, newPassword: string): Promise<{
-    success: boolean;
-    message?: string;
-    error?: string;
-  }> {
+  async changePassword(oldPassword: string, newPassword: string): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
       const token = this.authService.getAccessToken();
-      if (!token) {
-        return { success: false, error: 'No authentication token' };
-      }
-
+      if (!token) return { success: false, error: 'No authentication token' };
       const formData = new URLSearchParams();
       formData.append('old_password', oldPassword);
       formData.append('new_password', newPassword);
-
       const response = await fetch(`${API_BASE_URL}/users/me/change-password`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: formData,
       });
-
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          success: false, 
-          error: errorData.detail || `Failed to change password: ${response.status}` 
-        };
+        const err = await response.json().catch(() => ({}));
+        return { success: false, error: err.detail || `Failed to change password: ${response.status}` };
       }
-
       const data = await response.json();
       return { success: true, message: data.message };
     } catch (error) {
-      console.error('Error changing password:', error);
       return { success: false, error: 'Network error while changing password' };
     }
   }
 
-
-async getFakultasTarbiyah(
-    skip: number = 0,
-    limit: number = 100,
-    filters?: { gedung?: string; lantai?: number; fk?: string }
-  ): Promise<ApiResponse<RoomData[]>> {
-    let query = `/fk_tarbiyah?skip=${skip}&limit=${limit}`;
-    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
-    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
-    if (filters?.fk) query += `&fk=${encodeURIComponent(filters.fk)}`;
-    
-    return this.fetchWithAuth<RoomData[]>(query);
-  }
-
-  async getFakultasTarbiyahById(id: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_tarbiyah/${id}`);
-  }
-
-  async getFakultaTarbiyahsByNo(no: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_tarbiyah/no/${no}`);
-  }
-
-  async createFakultasTarbiyah(roomData: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>('/fk_tarbiyah', {
-      method: 'POST',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async updateFakultasTarbiyah(id: number, roomData: Partial<RoomData>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_tarbiyah/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async deleteFakultasTarbiyah(id: number): Promise<ApiResponse<{ message: string }>> {
-    return this.fetchWithAuth<{ message: string }>(`/fk_tarbiyah/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-async getFakultasTeknik(
-    skip: number = 0,
-    limit: number = 100,
-    filters?: { gedung?: string; lantai?: number; fk?: string }
-  ): Promise<ApiResponse<RoomData[]>> {
-    let query = `/fk_teknik?skip=${skip}&limit=${limit}`;
-    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
-    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
-    if (filters?.fk) query += `&fk=${encodeURIComponent(filters.fk)}`;
-    
-    return this.fetchWithAuth<RoomData[]>(query);
-  }
-
-  async getFakultasTeknikById(id: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_teknik/${id}`);
-  }
-
-  async getFakultasTeknikByNo(no: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_teknik/no/${no}`);
-  }
-
-  async createFakultasTeknik(roomData: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>('/fk_teknik', {
-      method: 'POST',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async updateFakultasTeknik(id: number, roomData: Partial<RoomData>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_teknik/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async deleteFakultasTeknik(id: number): Promise<ApiResponse<{ message: string }>> {
-    return this.fetchWithAuth<{ message: string }>(`/fk_teknik/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async getFakultasFikom(
-    skip: number = 0,
-    limit: number = 100,
-    filters?: { gedung?: string; lantai?: number; fk?: string }
-  ): Promise<ApiResponse<RoomData[]>> {
-    let query = `/fk_fikom?skip=${skip}&limit=${limit}`;
-    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
-    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
-    if (filters?.fk) query += `&fk=${encodeURIComponent(filters.fk)}`;
-    
-    return this.fetchWithAuth<RoomData[]>(query);
-  }
-
-  async getFakultasFikomById(id: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_fikom/${id}`);
-  }
-
-  async getFakultasFikomByNo(no: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_fikom/no/${no}`);
-  }
-
-  async createFakultasFikom(roomData: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>('/fk_fikom', {
-      method: 'POST',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async updateFakultasFikom(id: number, roomData: Partial<RoomData>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_fikom/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async deleteFakultasFikom(id: number): Promise<ApiResponse<{ message: string }>> {
-    return this.fetchWithAuth<{ message: string }>(`/fk_fikom/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async getFakultasHukum(
-    skip: number = 0,
-    limit: number = 100,
-    filters?: { gedung?: string; lantai?: number; fk?: string }
-  ): Promise<ApiResponse<RoomData[]>> {
-    let query = `/fk_hukum?skip=${skip}&limit=${limit}`;
-    if (filters?.gedung) query += `&gedung=${encodeURIComponent(filters.gedung)}`;
-    if (filters?.lantai) query += `&lantai=${filters.lantai}`;
-    if (filters?.fk) query += `&fk=${encodeURIComponent(filters.fk)}`;
-    
-    return this.fetchWithAuth<RoomData[]>(query);
-  }
-
-  async getFakultasHukumById(id: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_hukum/${id}`);
-  }
-
-  async getFakultasHukumByNo(no: number): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_hukum/no/${no}`);
-  }
-
-  async createFakultasHukum(roomData: Omit<RoomData, 'id' | 'created_at'>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>('/fk_hukum', {
-      method: 'POST',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async updateFakultasHukum(id: number, roomData: Partial<RoomData>): Promise<ApiResponse<RoomData>> {
-    return this.fetchWithAuth<RoomData>(`/fk_hukum/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(roomData),
-    });
-  }
-
-  async deleteFakultasHukum(id: number): Promise<ApiResponse<{ message: string }>> {
-    return this.fetchWithAuth<{ message: string }>(`/fk_hukum/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-
+  // ============================================================
   // ========== MASTER DATA ==========
+  // ============================================================
+
   async getMasterData(): Promise<MasterData> {
-    // Data statis - bisa diganti dengan API endpoint jika tersedia
     return {
       fakultas: [
         { value: "Fakultas Syariah", label: "01. Fakultas Syariah" },
@@ -1059,10 +741,6 @@ async getFakultasTeknik(
           { value: "Prodi Teknik Sipil", label: "02. Prodi Teknik Sipil" },
           { value: "Prodi Teknik Elektro", label: "03. Prodi Teknik Elektro" },
         ],
-        "Fakultas Dakwah": [
-          { value: "Prodi Komunikasi Penyiaran Islam", label: "01. Prodi Komunikasi Penyiaran Islam" },
-          { value: "Prodi Bimbingan Konseling Islam", label: "02. Prodi Bimbingan Konseling Islam" },
-        ],
         "Fakultas Tarbiyah dan Keguruan": [
           { value: "Prodi Pendidikan Agama Islam", label: "01. Prodi Pendidikan Agama Islam" },
           { value: "Prodi Pendidikan Bahasa Arab", label: "02. Prodi Pendidikan Bahasa Arab" },
@@ -1071,85 +749,84 @@ async getFakultasTeknik(
           { value: "Prodi Ilmu Komunikasi", label: "01. Prodi Ilmu Komunikasi" },
           { value: "Prodi Jurnalistik", label: "02. Prodi Jurnalistik" },
         ],
-      }
+      },
     };
   }
 
+  // ============================================================
   // ========== STATISTICS ==========
+  // ============================================================
+
+  /**
+   * Statistik gabungan: ruangan dari semua fakultas + hydrant/apar.
+   * Menggunakan Promise.allSettled agar satu gagal tidak blokir semua.
+   */
   async getStatistics(): Promise<ApiResponse<StatisticsData>> {
     try {
-      // Fetch all rooms data first
-      const result = await this.getFakultasEkonomi(0, 1000);
-      
-      if (!result.success || !result.data) {
-        return { 
-          success: false, 
-          error: 'Failed to fetch data for statistics' 
-        };
-      }
+      const [ekonomi, syariah, tarbiyah, teknik, fikom, hukum, proteksi] = await Promise.allSettled([
+        this.getFakultasEkonomi(0, 1000),
+        this.getFakultasSyariah(0, 1000),
+        this.getFakultasTarbiyah(0, 1000),
+        this.getFakultasTeknik(0, 1000),
+        this.getFakultasFikom(0, 1000),
+        this.getFakultasHukum(0, 1000),
+        this.getHydrantApar(0, 10000),
+      ]);
 
-      const data = result.data;
-      
-      // Calculate statistics
+      // Gabungkan semua data ruangan yang berhasil
+      const allRooms: RoomData[] = [];
+      [ekonomi, syariah, tarbiyah, teknik, fikom, hukum].forEach(res => {
+        if (res.status === 'fulfilled' && res.value.success && res.value.data) {
+          allRooms.push(...res.value.data);
+        }
+      });
+
       const statistics: StatisticsData = {
-        total_ruangan: data.length,
-        gedung_count: new Set(data.map(item => item.gedung)).size,
+        total_ruangan: allRooms.length,
+        gedung_count: new Set(allRooms.map(r => r.gedung)).size,
         lantai_distribution: {},
         fakultas_distribution: {},
       };
 
-      // Calculate distributions
-      data.forEach(item => {
-        // Lantai distribution
-        statistics.lantai_distribution[item.lantai] = 
-          (statistics.lantai_distribution[item.lantai] || 0) + 1;
-        
-        // Fakultas distribution
-        statistics.fakultas_distribution[item.fk] = 
-          (statistics.fakultas_distribution[item.fk] || 0) + 1;
+      allRooms.forEach(r => {
+        statistics.lantai_distribution[r.lantai] = (statistics.lantai_distribution[r.lantai] ?? 0) + 1;
+        statistics.fakultas_distribution[r.fk] = (statistics.fakultas_distribution[r.fk] ?? 0) + 1;
       });
 
-      return { 
-        success: true, 
-        data: statistics 
-      };
-      
+      // Tambahkan statistik proteksi jika berhasil
+      if (proteksi.status === 'fulfilled' && proteksi.value.success && proteksi.value.data) {
+        const pd = proteksi.value.data;
+        statistics.total_proteksi = pd.length;
+        statistics.hydrant_count = pd.filter(p => p.Proteksi === 'Hydrant').length;
+        statistics.apar_count = pd.filter(p => p.Proteksi === 'APAR').length;
+      }
+
+      return { success: true, data: statistics };
     } catch (error) {
-      console.error('Error in getStatistics:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to generate statistics',
-      };
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to generate statistics' };
     }
   }
 
-  // ========== SEARCH ==========
+  // ============================================================
+  // ========== SEARCH & TEST ==========
+  // ============================================================
+
   async searchRooms(query: string, filters?: { gedung?: string; lantai?: number }): Promise<ApiResponse<RoomData[]>> {
     let endpoint = `/fakultas/search?query=${encodeURIComponent(query)}`;
     if (filters?.gedung) endpoint += `&gedung=${encodeURIComponent(filters.gedung)}`;
     if (filters?.lantai) endpoint += `&lantai=${filters.lantai}`;
-    
     return this.fetchWithAuth<RoomData[]>(endpoint);
   }
 
-  // ========== API TEST ==========
   async testConnection(): Promise<{ success: boolean; message: string; status: number }> {
     try {
       const response = await fetch(`${API_BASE_URL}/`);
-      return {
-        success: response.ok,
-        message: response.ok ? 'API Connected' : 'API Error',
-        status: response.status,
-      };
+      return { success: response.ok, message: response.ok ? 'API Connected' : 'API Error', status: response.status };
     } catch (error) {
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Connection Failed',
-        status: 0,
-      };
+      return { success: false, message: error instanceof Error ? error.message : 'Connection Failed', status: 0 };
     }
   }
 }
 
-// Create and export singleton instance
+// Singleton export
 export const apiService = new ApiService();

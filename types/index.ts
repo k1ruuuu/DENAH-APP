@@ -58,6 +58,29 @@ export type RoleBadgeSize = 'sm' | 'md' | 'lg';
 export type StatCardColor = 'blue' | 'emerald' | 'amber' | 'purple';
 export type UserModalMode = 'create' | 'edit';
 
+// Data Hydrant & APAR
+export interface HydrantAparData {
+  id?: number;
+  no: string;
+  Proteksi: 'Hydrant' | 'APAR';
+  Lantai: string;
+  Gedung: string;
+  Kapasitas?: string | null;
+  Tekanan?: string | null;
+  Keterangan?: string | null;
+  Status?: 'Aktif' | 'Tidak Aktif' | 'Dalam Perbaikan';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProteksiFilterOptions {
+  search: string;
+  gedung: string;
+  lantai: string;
+  proteksi: string;  // 'Hydrant' | 'APAR' | ''
+  status: string;
+}
+
 // Key yang merepresentasikan setiap tabel fakultas di backend
 export type FakultasKey =
   | 'fk_ekonomi'
