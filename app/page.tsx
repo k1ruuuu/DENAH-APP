@@ -580,7 +580,7 @@ export default function LoginPage() {
               <div className="bg-gradient-to-br from-blue-900/90 to-indigo-900/90 backdrop-blur-sm rounded-2xl p-6 sm:p-8 shadow-2xl text-white">
                 <h3 className="text-lg sm:text-xl font-bold mb-6 flex items-center gap-2">
                   <Server className="h-6 w-6" />
-                  Informasi Sistem & Akun
+                  Informasi Sistem
                 </h3>
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   {stats.map((stat, index) => (
@@ -626,10 +626,6 @@ export default function LoginPage() {
                       <span className="text-blue-200">Database:</span>
                       <span className="text-white/80">MySQL</span>
                     </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-blue-200">Last Backup:</span>
-                      <span className="text-white/80">2 jam yang lalu</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -654,10 +650,7 @@ export default function LoginPage() {
               </div>
             </div>
             <p className="text-gray-500 text-sm">
-              © {new Date().getFullYear()} Gedung Dekanat - Sistem Denah Digital v2.1
-            </p>
-            <p className="text-gray-400 text-xs mt-1">
-              Hanya untuk penggunaan internal. Akses terbatas berdasarkan otorisasi.
+              © 2026 UNISBA - Sistem Denah Digital v1.0 - RC1
             </p>
           </motion.div>
         </div>

@@ -9,9 +9,12 @@ import {
   Clock, LogOut, RefreshCw as RefreshCwIcon, Eye, Trash2,
   Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Plus, BarChart3, FileText, ChevronDown, Shield, UserPlus, Building2, Flame,
+  Code2, Bell, MessageSquare, Wrench, Send, AlertTriangle, ToggleLeft, ToggleRight,
+  WifiOff, Activity,
 } from "lucide-react";
 
 import { apiService, RoomData } from "@/services/api";
+import type { HistoryHydrantAparData } from "@/services/api";
 import { useAuth } from "@/app/context/AuthContext";
 import { useApiStatus } from "@/hooks/useApiStatus";
 
@@ -22,7 +25,7 @@ import { UserModal } from "@/components/admin/UserModal";
 import { InteractiveMap } from "@/components/map/InteractiveMap";
 
 import {
-  GEDUNG_OPTIONS, BUILDINGS_DATA, HISTORY_PROTEKSI,
+  GEDUNG_OPTIONS, BUILDINGS_DATA,
 } from "@/constants";
 import {
   getLantaiOptions, getFloorsByBuilding, getBuildingPath,
@@ -97,11 +100,19 @@ export default function DashboardWithMap() {
   const [isLoadingProteksi, setIsLoadingProteksi] = useState(false);
   const [proteksiFilter, setProteksiFilter] = useState({
     search: "",
-    proteksi: "",   // 'Hydrant' | 'APAR' | ''
+    proteksi: "",
     gedung: "",
     lantai: "",
     status: "",
   });
+
+  // --- Data State (History Proteksi) ---
+  const [historyData, setHistoryData] = useState<HistoryHydrantAparData[]>([]);
+  const [filteredHistory, setFilteredHistory] = useState<HistoryHydrantAparData[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyFilterProteksi, setHistoryFilterProteksi] = useState("");
+  const [historyFilterKondisi, setHistoryFilterKondisi] = useState("");
 
   // --- Pagination State ---
   const [currentPage, setCurrentPage] = useState(1);
@@ -125,12 +136,49 @@ export default function DashboardWithMap() {
   const [adminPerPage, setAdminPerPage] = useState(10);
   const [adminCurrentPage, setAdminCurrentPage] = useState(1);
 
+  // --- Developer State ---
+  const [devPanel, setDevPanel] = useState<"maintenance" | "update" | "message">("maintenance");
+
+  // Maintenance
+  const [maintenanceStatus, setMaintenanceStatus] = useState(false);
+  const [isLoadingMaintenance, setIsLoadingMaintenance] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState("Kami sedang melakukan pembaruan sistem. Mohon tunggu sebentar.");
+
+  // Update/Patch Notif
+  const [patchTitle, setPatchTitle] = useState("");
+  const [patchSubtitle, setPatchSubtitle] = useState("");
+  const [patchMessage, setPatchMessage] = useState("");
+  const [patchBugUrl, setPatchBugUrl] = useState("");
+  const [isSendingPatch, setIsSendingPatch] = useState(false);
+  const [showPatchPreview, setShowPatchPreview] = useState(false);
+  // Notif aktif (simulated dari localStorage/BE)
+  const [activePatch, setActivePatch] = useState<{ title: string; subtitle: string; message: string; bugUrl: string } | null>(null);
+
+  // Custom Message
+  const [msgTarget, setMsgTarget] = useState<"all" | "admin" | "user" | "username">("all");
+  const [msgTargetUsername, setMsgTargetUsername] = useState("");
+  const [msgFrom, setMsgFrom] = useState("");
+  const [msgContent, setMsgContent] = useState("");
+  const [isSendingMsg, setIsSendingMsg] = useState(false);
+  const [msgPreview, setMsgPreview] = useState(false);
+
+  // Global notif yang muncul untuk semua user (patch dialog + custom message)
+  const [showPatchDialog, setShowPatchDialog] = useState(false);
+  const [showCustomMsgDialog, setShowCustomMsgDialog] = useState(false);
+  const [incomingMsg, setIncomingMsg] = useState<{ from: string; message: string } | null>(null);
+
   // ============================================================
   // Computed Values
   // ============================================================
 
-  const getUserRoleFromAuth = () => getUserRole() ?? "viewer";
-  const checkAdminAccess = () => isAdmin();
+  const getUserRoleFromAuth = () => getUserRole() ?? "user";
+  // Developer = full akses (admin + developer panel + bisa buat akun dev)
+  // Admin     = akses admin panel, tidak bisa CRUD akun developer
+  // User      = read only, tidak bisa akses admin/developer
+  const checkDeveloperAccess = () => getUserRoleFromAuth() === "developer";
+  const checkAdminAccess     = () => ["admin", "developer"].includes(getUserRoleFromAuth());
+  const checkCrudAccess      = () => ["admin", "developer"].includes(getUserRoleFromAuth());
+  const checkViewerOnly      = () => getUserRoleFromAuth() === "user";
   const isMobile = windowWidth < 768;
 
   const startIndex = (currentPage - 1) * rowsPerPage;
@@ -186,12 +234,13 @@ export default function DashboardWithMap() {
   const getMenuItems = () => {
     const userRole = getUserRoleFromAuth();
     const allItems = [
-      { name: "Dashboard", icon: <Home size={20} />, id: "dashboard", roles: ["admin", "viewer"] },
-      { name: "Denah Interaktif", icon: <Building size={20} />, id: "lantai", roles: ["admin", "viewer"] },
-      { name: "Manajemen Data", icon: <Settings size={20} />, id: "manajemen", roles: ["admin", "viewer"] },
-      { name: "History Proteksi", icon: <Clock size={20} />, id: "history", roles: ["admin", "viewer"] },
-      { name: "Admin Panel", icon: <Shield size={20} />, id: "admin", roles: ["admin", "viewer"] },
-      { name: "Logout", icon: <LogOut size={20} />, id: "logout", roles: ["admin", "viewer"] },
+      { name: "Dashboard", icon: <Home size={20} />, id: "dashboard", roles: ["admin", "user", "developer"] },
+      { name: "Denah Interaktif", icon: <Building size={20} />, id: "lantai", roles: ["admin", "user", "developer"] },
+      { name: "Manajemen Data", icon: <Settings size={20} />, id: "manajemen", roles: ["admin", "user", "developer"] },
+      { name: "History Proteksi", icon: <Clock size={20} />, id: "history", roles: ["admin", "user", "developer"] },
+      { name: "Admin Panel", icon: <Shield size={20} />, id: "admin", roles: ["admin", "developer"] },
+      { name: "Developer", icon: <Code2 size={20} />, id: "developer", roles: ["developer"] },
+      { name: "Logout", icon: <LogOut size={20} />, id: "logout", roles: ["admin", "user", "developer"] },
     ];
     return allItems.filter((item) => item.roles.includes(userRole));
   };
@@ -211,6 +260,8 @@ export default function DashboardWithMap() {
 
   useEffect(() => {
     if (active === "dashboard") fetchStatistics();
+    if (active === "history") fetchHistoryData();
+    if (active === "developer" && checkDeveloperAccess()) fetchMaintenanceStatus();
     if (active === "manajemen") {
       if (manajemenType === "ruangan") fetchRoomsData();
       else fetchProteksiData();
@@ -265,6 +316,67 @@ export default function DashboardWithMap() {
     applyProteksiFilters();
   }, [proteksiData, proteksiFilter]);
 
+  // Apply filter history
+  useEffect(() => {
+    applyHistoryFilters();
+  }, [historyData, historySearch, historyFilterProteksi, historyFilterKondisi]);
+
+  // Polling maintenance status setiap 30 detik (untuk non-developer)
+  useEffect(() => {
+    if (checkDeveloperAccess()) return;
+    const checkMaintenance = async () => {
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000/api/v1"}/mainten/1`, {
+          headers: { Authorization: `Bearer ${apiService.auth.getAccessToken()}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setMaintenanceStatus(data.status ?? false);
+          if (data.message) setMaintenanceMessage(data.message);
+        }
+      } catch { /* silent fail */ }
+    };
+    checkMaintenance();
+    const interval = setInterval(checkMaintenance, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Cek pesan masuk untuk user saat ini (polling tiap 60 detik)
+  useEffect(() => {
+    if (!user?.username) return;
+    const checkMessages = async () => {
+      try {
+        const role = getUserRoleFromAuth();
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000/api/v1"}/custom_message/unread?username=${user.username}&role=${role}`,
+          { headers: { Authorization: `Bearer ${apiService.auth.getAccessToken()}` } }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.message && !showCustomMsgDialog) {
+            setIncomingMsg({ from: data.from_name, message: data.message });
+            setShowCustomMsgDialog(true);
+          }
+        }
+        // Cek patch notif aktif
+        const patchRes = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000/api/v1"}/patch_notif/active`,
+          { headers: { Authorization: `Bearer ${apiService.auth.getAccessToken()}` } }
+        );
+        if (patchRes.ok) {
+          const pData = await patchRes.json();
+          if (pData && pData.title && !showPatchDialog) {
+            setActivePatch({ title: pData.title, subtitle: pData.subtitle, message: pData.message, bugUrl: pData.bug_url });
+            setShowPatchDialog(true);
+          }
+        }
+      } catch { /* silent fail */ }
+    };
+    checkMessages();
+    const interval = setInterval(checkMessages, 60000);
+    return () => clearInterval(interval);
+  }, [user?.username]);
+
   // ============================================================
   // Data Fetching
   // ============================================================
@@ -307,7 +419,7 @@ export default function DashboardWithMap() {
   const fetchProteksiData = async () => {
     setIsLoadingProteksi(true);
     try {
-      const result = await apiService.getHydrantApar(0, 1000);
+      const result = await apiService.getHydrantApar();
       if (result.success && result.data) {
         setProteksiData(result.data);
         setFilteredProteksi(result.data);
@@ -319,6 +431,134 @@ export default function DashboardWithMap() {
     } finally {
       setIsLoadingProteksi(false);
     }
+  };
+
+  const fetchHistoryData = async () => {
+    setIsLoadingHistory(true);
+    try {
+      const result = await apiService.getHistoryHydrantApar();
+      if (result.success && result.data) {
+        // Urutkan: terbaru di atas berdasarkan Tanggal_Pengecekan
+        const sorted = [...result.data].sort((a, b) =>
+          new Date(b.Tanggal_Pengecekan).getTime() - new Date(a.Tanggal_Pengecekan).getTime()
+        );
+        setHistoryData(sorted);
+        setFilteredHistory(sorted);
+      } else {
+        console.warn("Gagal fetch history:", result.error);
+      }
+    } catch (error) {
+      console.error("Error fetching history:", error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  // ============================================================
+  // Developer Functions
+  // ============================================================
+
+  const fetchMaintenanceStatus = async () => {
+    setIsLoadingMaintenance(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000/api/v1"}/mainten/1`, {
+        headers: { Authorization: `Bearer ${apiService.auth.getAccessToken()}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMaintenanceStatus(data.status ?? false);
+        if (data.message) setMaintenanceMessage(data.message);
+      }
+    } catch (e) {
+      console.warn("fetchMaintenanceStatus error:", e);
+    } finally {
+      setIsLoadingMaintenance(false);
+    }
+  };
+
+  const toggleMaintenance = async () => {
+    const newStatus = !maintenanceStatus;
+    setIsLoadingMaintenance(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000/api/v1"}/mainten/1`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiService.auth.getAccessToken()}`,
+        },
+        body: JSON.stringify({ status: newStatus, message: maintenanceMessage }),
+      });
+      if (res.ok) {
+        setMaintenanceStatus(newStatus);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("Gagal update maintenance: " + (err.detail || res.status));
+      }
+    } catch (e) {
+      alert("Error: " + e);
+    } finally {
+      setIsLoadingMaintenance(false);
+    }
+  };
+
+  const sendPatchNotif = async () => {
+    if (!patchTitle.trim() || !patchMessage.trim()) {
+      alert("Title dan Message wajib diisi."); return;
+    }
+    setIsSendingPatch(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000/api/v1"}/patch_notif`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiService.auth.getAccessToken()}`,
+        },
+        body: JSON.stringify({
+          title: patchTitle, subtitle: patchSubtitle,
+          message: patchMessage, bug_url: patchBugUrl, is_active: true,
+        }),
+      });
+      if (res.ok) {
+        setActivePatch({ title: patchTitle, subtitle: patchSubtitle, message: patchMessage, bugUrl: patchBugUrl });
+        setShowPatchPreview(false);
+        alert("✅ Patch notification berhasil dikirim ke semua user!");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("Gagal kirim patch: " + (err.detail || res.status));
+      }
+    } catch (e) { alert("Error: " + e); }
+    finally { setIsSendingPatch(false); }
+  };
+
+  const sendCustomMessage = async () => {
+    if (!msgContent.trim()) { alert("Message wajib diisi."); return; }
+    if (msgTarget === "username" && !msgTargetUsername.trim()) { alert("Username tujuan wajib diisi."); return; }
+    setIsSendingMsg(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000/api/v1"}/custom_message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiService.auth.getAccessToken()}`,
+        },
+        body: JSON.stringify({
+          from_name: msgFrom || user?.username || "Developer",
+          target_role: msgTarget === "username" ? null : msgTarget,
+          target_username: msgTarget === "username" ? msgTargetUsername : null,
+          message: msgContent,
+        }),
+      });
+      if (res.ok) {
+        setMsgPreview(false);
+        setMsgContent("");
+        setMsgTargetUsername("");
+        alert("✅ Pesan berhasil dikirim!");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("Gagal kirim pesan: " + (err.detail || res.status));
+      }
+    } catch (e) { alert("Error: " + e); }
+    finally { setIsSendingMsg(false); }
   };
 
   const fetchUsers = useCallback(async () => {
@@ -448,6 +688,31 @@ export default function DashboardWithMap() {
     setCurrentPage(1);
   };
 
+  const applyHistoryFilters = useCallback(() => {
+    let result = [...historyData];
+    if (historySearch) {
+      const s = historySearch.toLowerCase();
+      result = result.filter(
+        (h) =>
+          h.no.toLowerCase().includes(s) ||
+          h.Proteksi.toLowerCase().includes(s) ||
+          (h.Pemeriksa?.toLowerCase().includes(s)) ||
+          (h.Keterangan?.toLowerCase().includes(s)) ||
+          (h.Kondisi?.toLowerCase().includes(s))
+      );
+    }
+    if (historyFilterProteksi) result = result.filter((h) => h.Proteksi === historyFilterProteksi);
+    if (historyFilterKondisi) result = result.filter((h) => h.Kondisi === historyFilterKondisi);
+    setFilteredHistory(result);
+  }, [historyData, historySearch, historyFilterProteksi, historyFilterKondisi]);
+
+  const resetHistoryFilters = () => {
+    setHistorySearch("");
+    setHistoryFilterProteksi("");
+    setHistoryFilterKondisi("");
+    setFilteredHistory(historyData);
+  };
+
   const resetFilters = () => {
     setFilterOptions({ search: "", gedung: "", fakultas: "", lantai: "", subUnit: "" });
     setSelectedGedung("");
@@ -485,8 +750,10 @@ export default function DashboardWithMap() {
   const handleSetActive = (id: string) => {
     if (id === "logout") {
       handleLogout();
-    } else if (id === "admin" && !checkAdminAccess()) {
+    } else if (id === "admin" && !checkAdminAccess() && !checkDeveloperAccess()) {
       alert("Anda tidak memiliki akses ke Admin Panel");
+    } else if (id === "developer" && !checkDeveloperAccess()) {
+      alert("Anda tidak memiliki akses ke Developer Panel");
     } else {
       setActive(id);
       setMenuOpen(false);
@@ -666,8 +933,9 @@ export default function DashboardWithMap() {
                 );
               })}
 
+              {/* Admin Panel button (admin + developer) */}
               {checkAdminAccess() && (
-                <div className="relative ml-2">
+                <div className="relative ml-1">
                   <button
                     onClick={() => setShowAdminMenu(!showAdminMenu)}
                     className={`flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl transition-all duration-200 font-medium text-xs sm:text-sm ${
@@ -703,7 +971,23 @@ export default function DashboardWithMap() {
                 </div>
               )}
 
-              {!checkAdminAccess() && (
+              {/* Developer Panel button (developer only) */}
+              {checkDeveloperAccess() && (
+                <button
+                  onClick={() => handleSetActive("developer")}
+                  className={`flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl transition-all duration-200 font-medium text-xs sm:text-sm ml-1 ${
+                    active === "developer"
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-500/25"
+                      : "text-slate-700 hover:bg-slate-100 hover:text-violet-700"
+                  }`}
+                >
+                  <Code2 size={18} />
+                  <span>Developer</span>
+                </button>
+              )}
+
+              {/* Logout (user only — admin/dev punya logout di dropdown) */}
+              {checkViewerOnly() && (
                 <button onClick={handleLogout} className="flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl transition-all font-medium text-xs sm:text-sm text-slate-700 hover:bg-rose-50 hover:text-rose-600 ml-2">
                   <LogOut size={18} /><span>Logout</span>
                 </button>
@@ -753,6 +1037,7 @@ export default function DashboardWithMap() {
                     </button>
                   );
                 })}
+                {/* Admin Panel section (admin + developer) */}
                 {checkAdminAccess() && (
                   <div className="mt-2 pt-2 border-t border-slate-200">
                     <p className="px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">Admin Panel</p>
@@ -767,6 +1052,20 @@ export default function DashboardWithMap() {
                         </button>
                       );
                     })}
+                  </div>
+                )}
+
+                {/* Developer Panel section (developer only) */}
+                {checkDeveloperAccess() && (
+                  <div className="mt-2 pt-2 border-t border-slate-200">
+                    <p className="px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">Developer Panel</p>
+                    <button
+                      onClick={() => { setActive("developer"); setMenuOpen(false); }}
+                      className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${active === "developer" ? "bg-gradient-to-r from-violet-50 to-indigo-100 text-violet-700 border border-violet-200" : "text-slate-700 hover:bg-slate-50"}`}
+                    >
+                      <div className={`p-2 rounded-lg ${active === "developer" ? "bg-white shadow-sm" : "bg-slate-100"}`}><Code2 size={18} /></div>
+                      <span className="text-sm font-medium">Developer Tools</span>
+                    </button>
                   </div>
                 )}
                 <div className="mt-4 pt-4 border-t border-slate-200">
@@ -794,6 +1093,7 @@ export default function DashboardWithMap() {
                 active === "lantai" ? "bg-gradient-to-br from-emerald-100 to-emerald-200 text-emerald-700" :
                 active === "manajemen" ? "bg-gradient-to-br from-amber-100 to-amber-200 text-amber-700" :
                 active === "history" ? "bg-gradient-to-br from-purple-100 to-purple-200 text-purple-700" :
+                active === "developer" ? "bg-gradient-to-br from-violet-100 to-violet-200 text-violet-700" :
                 "bg-gradient-to-br from-red-100 to-red-200 text-red-700"
               }`}>
                 {menuItems.find((item) => item.id === active)?.icon}
@@ -808,6 +1108,7 @@ export default function DashboardWithMap() {
                   {active === "manajemen" && "Kelola data ruangan secara lengkap"}
                   {active === "history" && "Riwayat pengecekan alat proteksi kebakaran"}
                   {active === "admin" && "Manajemen pengguna dan hak akses sistem"}
+                  {active === "developer" && "Maintenance, update patch & pesan kustom"}
                 </p>
               </div>
             </div>
@@ -902,53 +1203,239 @@ export default function DashboardWithMap() {
           {/* ===== HISTORY TAB ===== */}
           {active === "history" && (
             <div className="p-3 sm:p-4 md:p-6">
-              <div className="flex items-center justify-between mb-4 sm:mb-6">
+
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
                 <div className="flex items-center gap-2 sm:gap-3">
-                  <div className="p-2 rounded-lg sm:rounded-xl bg-gradient-to-br from-purple-100 to-purple-200 text-purple-700"><Clock size={20} /></div>
+                  <div className="p-2 rounded-lg sm:rounded-xl bg-gradient-to-br from-purple-100 to-purple-200 text-purple-700">
+                    <Clock size={20} />
+                  </div>
                   <div>
                     <h2 className="text-lg sm:text-xl font-bold text-slate-900">History Proteksi</h2>
-                    <p className="text-slate-600 text-xs sm:text-sm">Riwayat pengecekan alat proteksi kebakaran</p>
+                    <p className="text-slate-600 text-xs sm:text-sm">
+                      Riwayat pengecekan alat proteksi kebakaran
+                    </p>
                   </div>
                 </div>
-                <button onClick={() => exportToJson(HISTORY_PROTEKSI, "history-proteksi")} className="flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-4 sm:py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg sm:rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all shadow-lg shadow-emerald-500/25 font-medium text-xs sm:text-sm">
-                  <Download size={14} /><span>Export</span>
-                </button>
-              </div>
-              <div className="border border-slate-200 rounded-lg sm:rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full">
-                    <thead className="bg-gradient-to-r from-slate-50 to-slate-100">
-                      <tr>
-                        {["No", "History ID", "Alat Proteksi", "Tanggal", "Status", "Expired", "Keterangan"].map((h) => (
-                          <th key={h} className="px-3 sm:px-4 py-2 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {HISTORY_PROTEKSI.map((item, index) => (
-                        <tr key={index} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-3 sm:px-4 py-2 text-sm font-medium text-slate-900">{index + 1}</td>
-                          <td className="px-3 sm:px-4 py-2">
-                            <div className="flex items-center gap-2">
-                              <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center ${item.status === "Expired" ? "bg-rose-100 text-rose-700" : item.status === "Rendah" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
-                                <span className="text-xs font-bold">H{index + 1}</span>
-                              </div>
-                              <span className="text-xs sm:text-sm font-medium text-slate-900">HR{String(index + 1).padStart(3, "0")}</span>
-                            </div>
-                          </td>
-                          <td className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-slate-900">{item.alatProteksi}</td>
-                          <td className="px-3 sm:px-4 py-2 text-xs sm:text-sm text-slate-900">{item.tanggal}</td>
-                          <td className="px-3 sm:px-4 py-2">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${item.status === "Expired" ? "bg-rose-100 text-rose-800" : item.status === "Rendah" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{item.status}</span>
-                          </td>
-                          <td className="px-3 sm:px-4 py-2 text-xs sm:text-sm">{item.expired}</td>
-                          <td className="px-3 sm:px-4 py-2 text-xs sm:text-sm text-slate-700 max-w-xs truncate">{item.keterangan}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex items-center gap-2">
+                  {/* Badge total */}
+                  <div className="px-3 py-1.5 bg-gradient-to-r from-purple-50 to-purple-100 rounded-lg border border-purple-200">
+                    <span className="text-xs sm:text-sm font-medium text-purple-700">
+                      Total: <span className="font-bold">{filteredHistory.length}</span>
+                      {filteredHistory.length !== historyData.length && (
+                        <span className="text-purple-400"> / {historyData.length}</span>
+                      )}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleApiOperation(fetchHistoryData)}
+                    disabled={isLoadingHistory}
+                    className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2.5 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg sm:rounded-xl hover:from-purple-600 hover:to-purple-700 transition-all disabled:opacity-50 font-medium text-xs sm:text-sm"
+                  >
+                    <RefreshCwIcon size={14} className={isLoadingHistory ? "animate-spin" : ""} />
+                    <span className="hidden sm:inline">{isLoadingHistory ? "Memuat..." : "Refresh"}</span>
+                  </button>
+                  <button
+                    onClick={() => exportToJson(filteredHistory, "history-proteksi")}
+                    disabled={filteredHistory.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg sm:rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/25 font-medium text-xs sm:text-sm"
+                  >
+                    <Download size={14} />
+                    <span className="hidden sm:inline">Export</span>
+                  </button>
                 </div>
               </div>
+
+              {/* Search & Filter */}
+              <div className="mb-4 flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+                  <input
+                    type="text"
+                    placeholder="Cari nomor alat, pemeriksa, keterangan..."
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-slate-700 placeholder-slate-400 text-sm"
+                  />
+                </div>
+                {/* Filter Jenis */}
+                <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                  {["", "Hydrant", "APAR"].map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => setHistoryFilterProteksi(type)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                        historyFilterProteksi === type
+                          ? type === "Hydrant" ? "bg-blue-600 text-white shadow"
+                          : type === "APAR" ? "bg-orange-500 text-white shadow"
+                          : "bg-white text-slate-700 shadow"
+                          : "text-slate-600 hover:bg-white/60"
+                      }`}
+                    >
+                      {type === "" ? "Semua" : type}
+                    </button>
+                  ))}
+                </div>
+                {/* Filter Kondisi */}
+                <select
+                  value={historyFilterKondisi}
+                  onChange={(e) => setHistoryFilterKondisi(e.target.value)}
+                  className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-slate-700"
+                >
+                  <option value="">Semua Kondisi</option>
+                  <option value="Baik">Baik</option>
+                  <option value="Perlu Perbaikan">Perlu Perbaikan</option>
+                  <option value="Rusak">Rusak</option>
+                </select>
+                {(historySearch || historyFilterProteksi || historyFilterKondisi) && (
+                  <button
+                    onClick={resetHistoryFilters}
+                    className="px-3 py-2 text-xs sm:text-sm text-slate-600 hover:text-slate-900 font-medium bg-white border border-slate-300 rounded-lg"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              {/* Loading State */}
+              {isLoadingHistory ? (
+                <div className="py-12 text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-200 border-t-purple-600 mx-auto mb-3" />
+                  <h4 className="text-base font-semibold text-slate-900 mb-1">Memuat History Proteksi</h4>
+                  <p className="text-slate-600 text-sm">Mengambil data dari server...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Tabel */}
+                  <div className="border border-slate-200 rounded-lg sm:rounded-xl overflow-hidden mb-3">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full">
+                        <thead className="bg-gradient-to-r from-purple-50 to-slate-50">
+                          <tr>
+                            {["No", "ID", "Nomor Alat", "Jenis", "Tgl Pengecekan", "Tgl Pengisian", "Expired", "Kondisi", "Pemeriksa", "Keterangan"].map((h) => (
+                              <th key={h} className="px-3 sm:px-4 py-2.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {filteredHistory.length > 0 ? (
+                            filteredHistory.map((item, index) => {
+                              // Cek expired: Expired_Date < hari ini
+                              const isExpired = item.Expired_Date
+                                ? new Date(item.Expired_Date) < new Date()
+                                : false;
+
+                              const kondisiColor =
+                                item.Kondisi === "Rusak" ? "bg-rose-100 text-rose-700" :
+                                item.Kondisi === "Perlu Perbaikan" ? "bg-amber-100 text-amber-700" :
+                                "bg-emerald-100 text-emerald-700";
+
+                              const proteksiColor =
+                                item.Proteksi === "Hydrant" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700";
+
+                              return (
+                                <tr key={item.id ?? index} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="px-3 sm:px-4 py-2.5 text-sm font-medium text-slate-900">{index + 1}</td>
+                                  <td className="px-3 sm:px-4 py-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${kondisiColor}`}>
+                                        <span className="text-xs font-bold">H{index + 1}</span>
+                                      </div>
+                                      <span className="text-xs font-mono font-semibold text-slate-700">
+                                        HR{String(index + 1).padStart(3, "0")}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5">
+                                    <span className="text-xs sm:text-sm font-mono font-medium text-slate-900">{item.no}</span>
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${proteksiColor}`}>
+                                      {item.Proteksi}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5 text-xs sm:text-sm text-slate-900 whitespace-nowrap">
+                                    {item.Tanggal_Pengecekan}
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5 text-xs sm:text-sm text-slate-600 whitespace-nowrap">
+                                    {item.Tanggal_Pengisian ?? "-"}
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5 whitespace-nowrap">
+                                    <span className={`text-xs sm:text-sm font-medium ${isExpired ? "text-rose-600" : "text-slate-700"}`}>
+                                      {item.Expired_Date ?? "-"}
+                                      {isExpired && (
+                                        <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-rose-100 text-rose-700 font-semibold">Expired</span>
+                                      )}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${kondisiColor}`}>
+                                      {item.Kondisi ?? "Baik"}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5 text-xs sm:text-sm text-slate-700">
+                                    {item.Pemeriksa ?? "-"}
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5">
+                                    <p className="text-xs text-slate-600 max-w-[160px] truncate" title={item.Keterangan}>
+                                      {item.Keterangan || "-"}
+                                    </p>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          ) : (
+                            <tr>
+                              <td colSpan={10} className="px-6 py-12 text-center">
+                                <div className="flex flex-col items-center justify-center">
+                                  <div className="w-14 h-14 bg-gradient-to-br from-purple-50 to-purple-100 rounded-full flex items-center justify-center mb-3">
+                                    <Clock size={24} className="text-purple-400" />
+                                  </div>
+                                  <h4 className="text-base font-semibold text-slate-900 mb-1">
+                                    {historyData.length === 0 ? "Belum ada history" : "Data tidak ditemukan"}
+                                  </h4>
+                                  <p className="text-slate-500 text-sm mb-3">
+                                    {historyData.length === 0
+                                      ? "Belum ada riwayat pengecekan alat proteksi."
+                                      : "Tidak ada data yang sesuai dengan filter."}
+                                  </p>
+                                  {(historySearch || historyFilterProteksi || historyFilterKondisi) && (
+                                    <button onClick={resetHistoryFilters} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-300">
+                                      Reset Filter
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Legend */}
+                  {historyData.length > 0 && (
+                    <div className="p-3 sm:p-4 bg-gradient-to-br from-slate-50 to-purple-50 rounded-lg border border-slate-200">
+                      <div className="flex flex-wrap items-center gap-4">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Kondisi:</p>
+                        {[
+                          { color: "bg-emerald-400", label: "Baik" },
+                          { color: "bg-amber-400", label: "Perlu Perbaikan" },
+                          { color: "bg-rose-400", label: "Rusak" },
+                        ].map(({ color, label }) => (
+                          <div key={label} className="flex items-center gap-1.5">
+                            <div className={`w-2.5 h-2.5 rounded-full ${color}`} />
+                            <span className="text-xs text-slate-600">{label}</span>
+                          </div>
+                        ))}
+                        <div className="ml-auto text-xs text-slate-500">
+                          Diurutkan: terbaru di atas
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -1150,22 +1637,29 @@ export default function DashboardWithMap() {
                                       {room.ukuranR ? <span className="text-xs sm:text-sm font-medium text-emerald-600">{room.ukuranR} m²</span> : <span className="text-xs sm:text-sm text-slate-400">-</span>}
                                     </td>
                                     <td className="px-3 sm:px-4 py-2">
-                                      <div className="flex items-center gap-1">
-                                        <button onClick={() => room.id && router.push(`/ruangan/${room.id}`)} className="p-1.5 bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-600 rounded-lg hover:from-emerald-100 hover:to-emerald-200 transition-all" title="Lihat detail"><Eye size={12} className="sm:w-4 sm:h-4" /></button>
-                                        <button onClick={() => setPopupRoomId(`room${room.no}`)} disabled={apiStatus === "offline"} className="p-1.5 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-600 rounded-lg hover:from-blue-100 hover:to-blue-200 transition-all disabled:opacity-50" title="Edit data"><Edit size={12} className="sm:w-4 sm:h-4" /></button>
-                                        <button
-                                          onClick={async () => {
-                                            if (!room.id || !confirm(`Hapus data ruangan ${room.ruangan}?`)) return;
-                                            await handleApiOperation(async () => {
-                                              const result = await deleteFakultasRoom(room._source, room.id!);
-                                              if (result.success) { fetchRoomsData(); alert("Data berhasil dihapus"); }
-                                            });
-                                          }}
-                                          disabled={apiStatus === "offline"}
-                                          className="p-1.5 bg-gradient-to-r from-rose-50 to-rose-100 text-rose-600 rounded-lg hover:from-rose-100 hover:to-rose-200 transition-all disabled:opacity-50"
-                                          title="Hapus data"
-                                        ><Trash2 size={12} className="sm:w-4 sm:h-4" /></button>
-                                      </div>
+                                      {checkCrudAccess() ? (
+                                        <div className="flex items-center gap-1">
+                                          <button onClick={() => room.id && router.push(`/ruangan/${room.id}`)} className="p-1.5 bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-600 rounded-lg hover:from-emerald-100 hover:to-emerald-200 transition-all" title="Lihat detail"><Eye size={12} className="sm:w-4 sm:h-4" /></button>
+                                          <button onClick={() => setPopupRoomId(`room${room.no}`)} disabled={apiStatus === "offline"} className="p-1.5 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-600 rounded-lg hover:from-blue-100 hover:to-blue-200 transition-all disabled:opacity-50" title="Edit data"><Edit size={12} className="sm:w-4 sm:h-4" /></button>
+                                          <button
+                                            onClick={async () => {
+                                              if (!room.id || !confirm(`Hapus data ruangan ${room.ruangan}?`)) return;
+                                              await handleApiOperation(async () => {
+                                                const result = await deleteFakultasRoom(room._source, room.id!);
+                                                if (result.success) { fetchRoomsData(); alert("Data berhasil dihapus"); }
+                                              });
+                                            }}
+                                            disabled={apiStatus === "offline"}
+                                            className="p-1.5 bg-gradient-to-r from-rose-50 to-rose-100 text-rose-600 rounded-lg hover:from-rose-100 hover:to-rose-200 transition-all disabled:opacity-50"
+                                            title="Hapus data"
+                                          ><Trash2 size={12} className="sm:w-4 sm:h-4" /></button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-1">
+                                          <button onClick={() => room.id && router.push(`/ruangan/${room.id}`)} className="p-1.5 bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-600 rounded-lg hover:from-emerald-100 hover:to-emerald-200 transition-all" title="Lihat detail"><Eye size={12} className="sm:w-4 sm:h-4" /></button>
+                                          <span className="text-xs text-slate-400 ml-1">👁️</span>
+                                        </div>
+                                      )}
                                     </td>
                                   </tr>
                                 ))
@@ -1301,6 +1795,26 @@ export default function DashboardWithMap() {
                         </select>
                       </div>
                     )}
+                    {/* Tambah Data — hanya untuk admin/developer */}
+                    {checkCrudAccess() ? (
+                      <button
+                        onClick={() => {
+                          setProteksiForm({ no:"",Proteksi:"Hydrant",Merk:"",Type:"",Lantai:"",Gedung:"",Kapasitas:"",Tekanan:"",Status:"Aktif",Keterangan:"" });
+                          setEditingProteksi(null);
+                          setProteksiFormMode("create");
+                          setShowProteksiModal(true);
+                        }}
+                        className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 sm:px-4 sm:py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg sm:rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all shadow-lg shadow-emerald-500/25 font-medium text-xs sm:text-sm"
+                      >
+                        <Plus size={14} className="sm:w-4 sm:h-4" />
+                        <span className="hidden sm:inline">Tambah Data</span>
+                        <span className="sm:hidden">Tambah</span>
+                      </button>
+                    ) : (
+                      <span className="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg text-xs font-medium border border-slate-200">
+                        👁️ View Only
+                      </span>
+                    )}
                   </div>
 
                   {isLoadingProteksi ? (
@@ -1360,14 +1874,29 @@ export default function DashboardWithMap() {
                                       <p className="text-xs text-slate-600 max-w-[140px] truncate" title={item.Keterangan}>{item.Keterangan || "-"}</p>
                                     </td>
                                     <td className="px-3 sm:px-4 py-2.5">
-                                      <div className="flex items-center gap-1">
-                                        <button
-                                          onClick={() => handleDeleteProteksi(item.id!, item.no)}
-                                          disabled={!item.id || apiStatus === "offline"}
-                                          className="p-1.5 bg-gradient-to-r from-rose-50 to-rose-100 text-rose-600 rounded-lg hover:from-rose-100 hover:to-rose-200 transition-all disabled:opacity-50"
-                                          title="Hapus data"
-                                        ><Trash2 size={12} className="sm:w-4 sm:h-4" /></button>
-                                      </div>
+                                      {checkCrudAccess() ? (
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={() => {
+                                              setEditingProteksi(item);
+                                              setProteksiForm({ no:item.no||"",Proteksi:item.Proteksi||"Hydrant",Merk:item.Merk||"",Type:item.Type||"",Lantai:item.Lantai||"",Gedung:item.Gedung||"",Kapasitas:item.Kapasitas||"",Tekanan:item.Tekanan||"",Status:item.Status||"Aktif",Keterangan:item.Keterangan||"" });
+                                              setProteksiFormMode("edit");
+                                              setShowProteksiModal(true);
+                                            }}
+                                            disabled={!item.id || apiStatus === "offline"}
+                                            className="p-1.5 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-600 rounded-lg hover:from-blue-100 hover:to-blue-200 transition-all disabled:opacity-50"
+                                            title="Edit data"
+                                          ><Edit size={12} className="sm:w-4 sm:h-4" /></button>
+                                          <button
+                                            onClick={() => handleDeleteProteksi(item.id!, item.no)}
+                                            disabled={!item.id || apiStatus === "offline"}
+                                            className="p-1.5 bg-gradient-to-r from-rose-50 to-rose-100 text-rose-600 rounded-lg hover:from-rose-100 hover:to-rose-200 transition-all disabled:opacity-50"
+                                            title="Hapus data"
+                                          ><Trash2 size={12} className="sm:w-4 sm:h-4" /></button>
+                                        </div>
+                                      ) : (
+                                        <span className="text-xs text-slate-400">👁️</span>
+                                      )}
                                     </td>
                                   </tr>
                                 ))
@@ -1483,27 +2012,42 @@ export default function DashboardWithMap() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
-                        {sortedUsers.map((u, index) => (
-                          <tr key={u.id} className="hover:bg-slate-50 transition-colors group">
-                            <td className="px-4 py-3 text-sm text-slate-900">{index + 1}</td>
-                            <td className="px-4 py-3 text-sm">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center"><span className="text-xs font-bold text-red-700">USR</span></div>
-                                <span className="font-mono text-slate-900">{String(u.id).padStart(3, "0")}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3"><p className="text-sm font-medium text-slate-900">{u.name}</p></td>
-                            <td className="px-4 py-3 text-sm text-slate-600">{u.username}</td>
-                            <td className="px-4 py-3"><RoleBadge role={u.role} /></td>
-                            <td className="px-4 py-3 text-sm text-slate-600">{u.createdAt}</td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => { setUserModalMode("edit"); setEditingUser(u); setShowUserModal(true); }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all hover:scale-110" title="Edit user"><Edit size={16} /></button>
-                                <button onClick={() => handleUserDelete(u.id, u.name)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-all hover:scale-110" title="Delete user"><Trash2 size={16} /></button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                        {sortedUsers.map((u, index) => {
+                          // Admin tidak bisa CRUD akun developer
+                          const isDevAccount = u.role === "developer";
+                          const canCrud = checkDeveloperAccess() || (!isDevAccount);
+                          return (
+                            <tr key={u.id} className="hover:bg-slate-50 transition-colors group">
+                              <td className="px-4 py-3 text-sm text-slate-900">{index + 1}</td>
+                              <td className="px-4 py-3 text-sm">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                                    isDevAccount ? "bg-gradient-to-br from-violet-100 to-violet-200" : "bg-gradient-to-br from-red-100 to-red-200"
+                                  }`}>
+                                    <span className={`text-xs font-bold ${isDevAccount ? "text-violet-700" : "text-red-700"}`}>
+                                      {isDevAccount ? "DEV" : "USR"}
+                                    </span>
+                                  </div>
+                                  <span className="font-mono text-slate-900">{String(u.id).padStart(3, "0")}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3"><p className="text-sm font-medium text-slate-900">{u.name}</p></td>
+                              <td className="px-4 py-3 text-sm text-slate-600">{u.username}</td>
+                              <td className="px-4 py-3"><RoleBadge role={u.role} /></td>
+                              <td className="px-4 py-3 text-sm text-slate-600">{u.createdAt}</td>
+                              <td className="px-4 py-3">
+                                {canCrud ? (
+                                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => { setUserModalMode("edit"); setEditingUser(u); setShowUserModal(true); }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all hover:scale-110" title="Edit user"><Edit size={16} /></button>
+                                    <button onClick={() => handleUserDelete(u.id, u.name)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-all hover:scale-110" title="Delete user"><Trash2 size={16} /></button>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-slate-400 italic">🔒 Protected</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1541,6 +2085,417 @@ export default function DashboardWithMap() {
             </div>
           )}
 
+          {/* ===== DEVELOPER TAB ===== */}
+          {active === "developer" && checkDeveloperAccess() && (
+            <div className="p-3 sm:p-4 md:p-6 space-y-6">
+
+              {/* Header */}
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-500/30">
+                  <Code2 size={22} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Developer Panel</h2>
+                  <p className="text-slate-500 text-sm">Kontrol sistem, notifikasi & pesan kustom</p>
+                </div>
+                <div className="ml-auto px-3 py-1 bg-violet-100 text-violet-700 rounded-full text-xs font-semibold border border-violet-200">
+                  🔐 Developer Only
+                </div>
+              </div>
+
+              {/* Sub-nav tabs */}
+              <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-fit">
+                {([
+                  { id: "maintenance", label: "Maintenance", icon: <Wrench size={15} /> },
+                  { id: "update", label: "Update Panel", icon: <Bell size={15} /> },
+                  { id: "message", label: "Custom Message", icon: <MessageSquare size={15} /> },
+                ] as const).map(({ id, label, icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => setDevPanel(id)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      devPanel === id
+                        ? "bg-white text-violet-700 shadow-sm border border-violet-100"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {icon}{label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ---- MAINTENANCE PANEL ---- */}
+              {devPanel === "maintenance" && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+                  {/* Control Card */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-5 pt-5 pb-4 border-b border-slate-100">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Activity size={16} className="text-slate-500" />
+                        <h3 className="font-semibold text-slate-900">Status Maintenance</h3>
+                      </div>
+                      <p className="text-xs text-slate-500">Kontrol akses aplikasi untuk semua user</p>
+                    </div>
+                    <div className="p-5 space-y-5">
+
+                      {/* Big Toggle */}
+                      <div className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all ${
+                        maintenanceStatus
+                          ? "bg-amber-50 border-amber-300"
+                          : "bg-emerald-50 border-emerald-300"
+                      }`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2.5 rounded-xl ${maintenanceStatus ? "bg-amber-100" : "bg-emerald-100"}`}>
+                            {maintenanceStatus ? <WifiOff size={20} className="text-amber-600" /> : <CheckCircle size={20} className="text-emerald-600" />}
+                          </div>
+                          <div>
+                            <p className={`font-semibold text-sm ${maintenanceStatus ? "text-amber-800" : "text-emerald-800"}`}>
+                              {maintenanceStatus ? "⚠️ MAINTENANCE AKTIF" : "✅ SISTEM NORMAL"}
+                            </p>
+                            <p className={`text-xs mt-0.5 ${maintenanceStatus ? "text-amber-600" : "text-emerald-600"}`}>
+                              {maintenanceStatus ? "User hanya melihat halaman maintenance" : "Semua user bisa mengakses aplikasi"}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={toggleMaintenance}
+                          disabled={isLoadingMaintenance}
+                          className={`relative w-14 h-7 rounded-full transition-all duration-300 focus:outline-none ${
+                            maintenanceStatus ? "bg-amber-500" : "bg-emerald-500"
+                          } ${isLoadingMaintenance ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                        >
+                          <div className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${maintenanceStatus ? "left-8" : "left-1"}`} />
+                        </button>
+                      </div>
+
+                      {/* Maintenance Message */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-2 uppercase tracking-wide">
+                          Pesan Maintenance
+                        </label>
+                        <textarea
+                          value={maintenanceMessage}
+                          onChange={(e) => setMaintenanceMessage(e.target.value)}
+                          rows={3}
+                          className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-violet-500 focus:border-violet-500 resize-none"
+                          placeholder="Masukkan pesan yang akan ditampilkan saat maintenance..."
+                        />
+                      </div>
+
+                      <button
+                        onClick={toggleMaintenance}
+                        disabled={isLoadingMaintenance}
+                        className={`w-full py-2.5 rounded-xl font-semibold text-sm transition-all ${
+                          maintenanceStatus
+                            ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 shadow-lg shadow-emerald-500/25"
+                            : "bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/25"
+                        } disabled:opacity-50`}
+                      >
+                        {isLoadingMaintenance ? "⏳ Memproses..." : maintenanceStatus ? "✅ Matikan Maintenance" : "🔧 Aktifkan Maintenance"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Preview Card */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-5 pt-5 pb-4 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <Eye size={16} className="text-slate-500" />
+                        <h3 className="font-semibold text-slate-900">Preview Halaman Maintenance</h3>
+                      </div>
+                    </div>
+                    <div className="p-5">
+                      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 rounded-xl p-6 text-center min-h-[220px] flex flex-col items-center justify-center gap-4">
+                        <div className="relative">
+                          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center mx-auto">
+                            <Wrench size={32} className="text-amber-400" />
+                          </div>
+                          <div className="absolute -top-1 -right-1 w-4 h-4 bg-amber-400 rounded-full animate-pulse" />
+                        </div>
+                        <div>
+                          <h2 className="text-white font-bold text-lg">Sedang Maintenance</h2>
+                          <p className="text-slate-400 text-xs mt-1 max-w-xs">
+                            {maintenanceMessage || "Kami sedang melakukan pembaruan sistem."}
+                          </p>
+                        </div>
+                        <div className="flex gap-1.5 mt-1">
+                          {[0, 1, 2].map((i) => (
+                            <div key={i} className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                          ))}
+                        </div>
+                        <p className="text-slate-500 text-xs">Sistem Denah Digital — UNISBA</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ---- UPDATE PANEL ---- */}
+              {devPanel === "update" && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+                  {/* Form */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-5 pt-5 pb-4 border-b border-slate-100">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Bell size={16} className="text-slate-500" />
+                        <h3 className="font-semibold text-slate-900">Buat Patch Notification</h3>
+                      </div>
+                      <p className="text-xs text-slate-500">Dialog update yang muncul untuk semua user saat login</p>
+                    </div>
+                    <div className="p-5 space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Title *</label>
+                        <input
+                          type="text"
+                          value={patchTitle}
+                          onChange={(e) => setPatchTitle(e.target.value)}
+                          placeholder="Contoh: Update v2.3.1 Tersedia"
+                          className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Sub Title</label>
+                        <input
+                          type="text"
+                          value={patchSubtitle}
+                          onChange={(e) => setPatchSubtitle(e.target.value)}
+                          placeholder="Contoh: Perbaikan bug & peningkatan performa"
+                          className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Message *</label>
+                        <textarea
+                          value={patchMessage}
+                          onChange={(e) => setPatchMessage(e.target.value)}
+                          rows={4}
+                          placeholder="Deskripsi perubahan yang dilakukan pada update ini..."
+                          className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500 resize-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Link Report Bug</label>
+                        <input
+                          type="url"
+                          value={patchBugUrl}
+                          onChange={(e) => setPatchBugUrl(e.target.value)}
+                          placeholder="https://github.com/..."
+                          className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                        />
+                      </div>
+                      <div className="flex gap-3 pt-1">
+                        <button
+                          onClick={() => setShowPatchPreview(true)}
+                          className="flex-1 py-2.5 rounded-xl border border-violet-300 text-violet-700 font-semibold text-sm hover:bg-violet-50 transition-all"
+                        >
+                          <Eye size={15} className="inline mr-1.5" />Preview
+                        </button>
+                        <button
+                          onClick={sendPatchNotif}
+                          disabled={isSendingPatch || !patchTitle || !patchMessage}
+                          className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-semibold text-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 transition-all shadow-lg shadow-violet-500/25"
+                        >
+                          <Send size={15} className="inline mr-1.5" />
+                          {isSendingPatch ? "Mengirim..." : "Kirim ke Semua User"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Live Preview Card */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-5 pt-5 pb-4 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <Eye size={16} className="text-slate-500" />
+                        <h3 className="font-semibold text-slate-900">Preview Toast/Dialog</h3>
+                      </div>
+                    </div>
+                    <div className="p-5 flex items-center justify-center min-h-[340px] bg-slate-50 rounded-b-2xl">
+                      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+                        {/* Dialog Header */}
+                        <div className="bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
+                              <Bell size={18} className="text-white" />
+                            </div>
+                            <div>
+                              <p className="text-white font-bold text-sm">{patchTitle || "Update v2.3.1 Tersedia"}</p>
+                              <p className="text-violet-200 text-xs">{patchSubtitle || "Perbaikan & peningkatan performa"}</p>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Dialog Body */}
+                        <div className="px-5 py-4">
+                          <p className="text-slate-600 text-sm leading-relaxed">
+                            {patchMessage || "Masukkan message di form untuk melihat preview..."}
+                          </p>
+                        </div>
+                        {/* Dialog Buttons */}
+                        <div className="px-5 pb-5 flex gap-2">
+                          <a
+                            href={patchBugUrl || "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 text-center py-2 rounded-xl border border-slate-300 text-slate-600 text-xs font-semibold hover:bg-slate-50"
+                          >
+                            🐛 Report Bug
+                          </a>
+                          <button className="flex-1 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-xs font-semibold hover:from-violet-700 hover:to-indigo-700">
+                            ✅ I Understand
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ---- CUSTOM MESSAGE ---- */}
+              {devPanel === "message" && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+                  {/* Form */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-5 pt-5 pb-4 border-b border-slate-100">
+                      <div className="flex items-center gap-2 mb-1">
+                        <MessageSquare size={16} className="text-slate-500" />
+                        <h3 className="font-semibold text-slate-900">Kirim Pesan Kustom</h3>
+                      </div>
+                      <p className="text-xs text-slate-500">Pesan yang muncul sebagai dialog saat user membuka aplikasi</p>
+                    </div>
+                    <div className="p-5 space-y-4">
+
+                      {/* From */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Dari (From)</label>
+                        <input
+                          type="text"
+                          value={msgFrom}
+                          onChange={(e) => setMsgFrom(e.target.value)}
+                          placeholder={user?.username || "Developer"}
+                          className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                        />
+                        <p className="text-xs text-slate-400 mt-1">Kosongkan untuk menggunakan username Anda: <span className="font-medium text-slate-600">{user?.username}</span></p>
+                      </div>
+
+                      {/* Target */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Kirim Ke</label>
+                        <div className="flex gap-2 flex-wrap">
+                          {([
+                            { value: "all", label: "🌐 Semua User" },
+                            { value: "admin", label: "🛡️ Admin" },
+                            { value: "user", label: "👁️ User" },
+                            { value: "username", label: "👤 Username Tertentu" },
+                          ] as const).map(({ value, label }) => (
+                            <button
+                              key={value}
+                              onClick={() => setMsgTarget(value)}
+                              className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                                msgTarget === value
+                                  ? "bg-violet-600 text-white border-violet-600"
+                                  : "bg-white text-slate-600 border-slate-300 hover:border-violet-300"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        {msgTarget === "username" && (
+                          <input
+                            type="text"
+                            value={msgTargetUsername}
+                            onChange={(e) => setMsgTargetUsername(e.target.value)}
+                            placeholder="Masukkan username tujuan..."
+                            className="mt-2 w-full px-4 py-2.5 border border-violet-300 rounded-xl text-sm focus:ring-2 focus:ring-violet-500"
+                          />
+                        )}
+                      </div>
+
+                      {/* Message */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Pesan *</label>
+                        <textarea
+                          value={msgContent}
+                          onChange={(e) => setMsgContent(e.target.value)}
+                          rows={5}
+                          placeholder="Ketik pesan yang akan diterima user..."
+                          className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500 resize-none"
+                        />
+                        <p className="text-xs text-slate-400 mt-1">{msgContent.length} karakter</p>
+                      </div>
+
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setMsgPreview(true)}
+                          className="flex-1 py-2.5 rounded-xl border border-violet-300 text-violet-700 font-semibold text-sm hover:bg-violet-50 transition-all"
+                        >
+                          <Eye size={15} className="inline mr-1.5" />Preview
+                        </button>
+                        <button
+                          onClick={sendCustomMessage}
+                          disabled={isSendingMsg || !msgContent}
+                          className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-semibold text-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 transition-all shadow-lg shadow-violet-500/25"
+                        >
+                          <Send size={15} className="inline mr-1.5" />
+                          {isSendingMsg ? "Mengirim..." : "Kirim Pesan"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-5 pt-5 pb-4 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <Eye size={16} className="text-slate-500" />
+                        <h3 className="font-semibold text-slate-900">Preview Dialog Pesan</h3>
+                      </div>
+                    </div>
+                    <div className="p-5 flex items-center justify-center min-h-[340px] bg-slate-50 rounded-b-2xl">
+                      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-slate-800 to-slate-900 px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 bg-violet-500/30 rounded-full flex items-center justify-center">
+                              <span className="text-violet-300 text-sm font-bold">
+                                {(msgFrom || user?.username || "D").charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="text-white font-semibold text-sm">{msgFrom || user?.username || "Developer"}</p>
+                              <p className="text-slate-400 text-xs">
+                                {msgTarget === "all" ? "Kepada: Semua User" :
+                                 msgTarget === "admin" ? "Kepada: Admin" :
+                                 msgTarget === "user" ? "Kepada: User" :
+                                 `Kepada: @${msgTargetUsername || "username"}`}
+                              </p>
+                            </div>
+                            <div className="ml-auto w-2 h-2 bg-emerald-400 rounded-full" />
+                          </div>
+                        </div>
+                        {/* Body */}
+                        <div className="px-5 py-5">
+                          <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">
+                            {msgContent || "Isi pesan akan ditampilkan di sini..."}
+                          </p>
+                        </div>
+                        {/* Button */}
+                        <div className="px-5 pb-5">
+                          <button className="w-full py-2.5 rounded-xl bg-gradient-to-r from-slate-800 to-slate-900 text-white text-sm font-semibold">
+                            ✅ Ok, Mengerti
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
       </main>
 
@@ -1567,6 +2522,137 @@ export default function DashboardWithMap() {
       {popupRoomId && <RoomPopup roomId={popupRoomId} onClose={() => setPopupRoomId(null)} />}
       {showUserModal && (
         <UserModal mode={userModalMode} user={editingUser} onClose={() => { setShowUserModal(false); setEditingUser(null); }} onSave={handleUserSave} />
+      )}
+
+      {/* ===== MAINTENANCE OVERLAY (untuk non-developer saat maintenance aktif) ===== */}
+      {maintenanceStatus && !checkDeveloperAccess() && (
+        <div className="fixed inset-0 z-[9999] bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 flex items-center justify-center p-4">
+          {/* Animated BG dots */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {[...Array(20)].map((_, i) => (
+              <div
+                key={i}
+                className="absolute w-1 h-1 bg-white/10 rounded-full animate-pulse"
+                style={{
+                  left: `${Math.random() * 100}%`,
+                  top: `${Math.random() * 100}%`,
+                  animationDelay: `${Math.random() * 3}s`,
+                  animationDuration: `${2 + Math.random() * 3}s`,
+                }}
+              />
+            ))}
+          </div>
+
+          <div className="relative text-center max-w-md w-full">
+            {/* Icon */}
+            <div className="relative mx-auto w-24 h-24 mb-6">
+              <div className="w-24 h-24 rounded-3xl bg-amber-500/20 border-2 border-amber-500/40 flex items-center justify-center mx-auto">
+                <Wrench size={44} className="text-amber-400" />
+              </div>
+              <div className="absolute -top-2 -right-2 w-6 h-6 bg-amber-400 rounded-full animate-ping" />
+              <div className="absolute -top-2 -right-2 w-6 h-6 bg-amber-400 rounded-full" />
+            </div>
+
+            {/* Text */}
+            <h1 className="text-3xl font-bold text-white mb-3">Sedang Maintenance</h1>
+            <p className="text-slate-400 text-base leading-relaxed mb-6">
+              {maintenanceMessage || "Kami sedang melakukan pembaruan sistem. Mohon tunggu sebentar dan coba kembali."}
+            </p>
+
+            {/* Animated dots */}
+            <div className="flex items-center justify-center gap-2 mb-8">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="w-3 h-3 bg-amber-400 rounded-full animate-bounce"
+                  style={{ animationDelay: `${i * 0.2}s` }}
+                />
+              ))}
+            </div>
+
+            {/* Progress bar */}
+            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden mb-6">
+              <div className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full w-2/3 animate-pulse" />
+            </div>
+
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full">
+              <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
+              <span className="text-slate-300 text-sm">Sistem Denah Digital — UNISBA</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== PATCH NOTIFICATION DIALOG ===== */}
+      {showPatchDialog && activePatch && (
+        <div className="fixed inset-0 z-[9998] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                  <Bell size={20} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-white font-bold">{activePatch.title}</h2>
+                  {activePatch.subtitle && <p className="text-violet-200 text-sm">{activePatch.subtitle}</p>}
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-slate-600 text-sm leading-relaxed">{activePatch.message}</p>
+            </div>
+            <div className="px-6 pb-6 flex gap-3">
+              {activePatch.bugUrl && (
+                <a
+                  href={activePatch.bugUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 text-center py-2.5 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50 transition-all"
+                >
+                  🐛 Report Bug
+                </a>
+              )}
+              <button
+                onClick={() => setShowPatchDialog(false)}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-semibold hover:from-violet-700 hover:to-indigo-700 transition-all"
+              >
+                ✅ I Understand
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== CUSTOM MESSAGE DIALOG ===== */}
+      {showCustomMsgDialog && incomingMsg && (
+        <div className="fixed inset-0 z-[9997] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="bg-gradient-to-r from-slate-800 to-slate-900 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-violet-500/30 rounded-full flex items-center justify-center">
+                  <span className="text-violet-300 font-bold text-lg">
+                    {incomingMsg.from.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-white font-semibold text-sm">{incomingMsg.from}</p>
+                  <p className="text-slate-400 text-xs">Pesan untuk Anda</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-5">
+              <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">{incomingMsg.message}</p>
+            </div>
+            <div className="px-5 pb-5">
+              <button
+                onClick={() => setShowCustomMsgDialog(false)}
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-slate-800 to-slate-900 text-white text-sm font-semibold hover:from-slate-700 hover:to-slate-800 transition-all"
+              >
+                ✅ Ok, Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

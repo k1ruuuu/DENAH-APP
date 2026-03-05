@@ -106,6 +106,31 @@ export interface HydrantAparStats {
   lantai_distribution: Record<string, number>;
 }
 
+// ========== HISTORY HYDRANT & APAR ==========
+
+export type KondisiType = 'Baik' | 'Perlu Perbaikan' | 'Rusak';
+
+export interface HistoryHydrantAparData {
+  id?: number;
+  no: string;                      // Referensi ke tabel hydrant_apar
+  Proteksi: ProteksiType;          // 'Hydrant' | 'APAR'
+  Tanggal_Pengisian?: string;      // date (nullable)
+  Tanggal_Pengecekan: string;      // date (required)
+  Kapasitas?: string;
+  Tekanan?: string;
+  Expired_Date?: string;           // date (nullable)
+  Keterangan?: string;
+  Pemeriksa?: string;
+  Kondisi?: KondisiType;           // default: 'Baik'
+  created_at?: string;
+}
+
+export interface HistoryHydrantAparFilters {
+  proteksi?: ProteksiType | '';
+  kondisi?: KondisiType | '';
+  no?: string;
+}
+
 // ========== LAINNYA ==========
 
 export interface MasterData {
@@ -349,17 +374,61 @@ class ApiService {
    * Ambil semua data Hydrant & APAR dengan filter opsional.
    * Endpoint: GET /hydrantApar
    */
-  async getHydrantApar(
-    skip = 0,
-    limit = 1000,
+  /**
+   * Fetch satu halaman hydrantApar (max 100 per request sesuai batasan backend).
+   * Untuk internal use — gunakan getHydrantApar() untuk fetch semua data.
+   */
+  private async fetchHydrantAparPage(
+    skip: number,
     filters?: HydrantAparFilters,
   ): Promise<ApiResponse<HydrantAparData[]>> {
-    let query = `/hydrantApar?skip=${skip}&limit=${limit}`;
+    const PAGE_SIZE = 100; // Batas maksimal backend
+    let query = `/hydrantApar?skip=${skip}&limit=${PAGE_SIZE}`;
     if (filters?.proteksi) query += `&Proteksi=${encodeURIComponent(filters.proteksi)}`;
     if (filters?.gedung)   query += `&Gedung=${encodeURIComponent(filters.gedung)}`;
     if (filters?.lantai)   query += `&Lantai=${encodeURIComponent(filters.lantai)}`;
     if (filters?.status)   query += `&Status=${encodeURIComponent(filters.status)}`;
     return this.fetchWithAuth<HydrantAparData[]>(query);
+  }
+
+  /**
+   * Ambil SEMUA data Hydrant & APAR dengan pagination otomatis.
+   * Backend membatasi max 100 per request — method ini loop sampai semua data terkumpul.
+   * Endpoint: GET /hydrantApar
+   */
+  async getHydrantApar(filters?: HydrantAparFilters): Promise<ApiResponse<HydrantAparData[]>> {
+    const PAGE_SIZE = 100;
+    const allData: HydrantAparData[] = [];
+    let skip = 0;
+
+    try {
+      while (true) {
+        const result = await this.fetchHydrantAparPage(skip, filters);
+
+        if (!result.success || !result.data) {
+          // Kalau halaman pertama gagal, return error
+          if (skip === 0) return { success: false, error: result.error };
+          // Kalau halaman selanjutnya gagal, return data yang sudah terkumpul
+          console.warn(`Pagination berhenti di skip=${skip}:`, result.error);
+          break;
+        }
+
+        allData.push(...result.data);
+
+        // Jika data yang dikembalikan < PAGE_SIZE, berarti ini halaman terakhir
+        if (result.data.length < PAGE_SIZE) break;
+
+        skip += PAGE_SIZE;
+      }
+
+      return { success: true, data: allData };
+    } catch (error) {
+      console.error('getHydrantApar pagination error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch hydrant/apar data',
+      };
+    }
   }
 
   /**
@@ -415,12 +484,108 @@ class ApiService {
     });
   }
 
+  // ============================================================
+  // ========== HISTORY HYDRANT & APAR ==========
+  // ============================================================
+
+  /**
+   * Fetch satu halaman history (max 100 per request).
+   */
+  private async fetchHistoryPage(
+    skip: number,
+    filters?: HistoryHydrantAparFilters,
+  ): Promise<ApiResponse<HistoryHydrantAparData[]>> {
+    const PAGE_SIZE = 100;
+    let query = `/history_hydrantApar?skip=${skip}&limit=${PAGE_SIZE}`;
+    if (filters?.proteksi) query += `&Proteksi=${encodeURIComponent(filters.proteksi)}`;
+    if (filters?.kondisi)  query += `&Kondisi=${encodeURIComponent(filters.kondisi)}`;
+    if (filters?.no)       query += `&no=${encodeURIComponent(filters.no)}`;
+    return this.fetchWithAuth<HistoryHydrantAparData[]>(query);
+  }
+
+  /**
+   * Ambil SEMUA history Hydrant & APAR dengan pagination otomatis.
+   * Endpoint: GET /history_hydrantApar
+   */
+  async getHistoryHydrantApar(
+    filters?: HistoryHydrantAparFilters,
+  ): Promise<ApiResponse<HistoryHydrantAparData[]>> {
+    const PAGE_SIZE = 100;
+    const allData: HistoryHydrantAparData[] = [];
+    let skip = 0;
+
+    try {
+      while (true) {
+        const result = await this.fetchHistoryPage(skip, filters);
+        if (!result.success || !result.data) {
+          if (skip === 0) return { success: false, error: result.error };
+          console.warn(`History pagination berhenti di skip=${skip}:`, result.error);
+          break;
+        }
+        allData.push(...result.data);
+        if (result.data.length < PAGE_SIZE) break;
+        skip += PAGE_SIZE;
+      }
+      return { success: true, data: allData };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch history data',
+      };
+    }
+  }
+
+  /**
+   * Ambil satu history berdasarkan ID.
+   * Endpoint: GET /history_hydrantApar/{id}
+   */
+  async getHistoryHydrantAparById(id: number): Promise<ApiResponse<HistoryHydrantAparData>> {
+    return this.fetchWithAuth<HistoryHydrantAparData>(`/history_hydrantApar/${id}`);
+  }
+
+  /**
+   * Tambah history baru.
+   * Endpoint: POST /history_hydrantApar
+   */
+  async createHistoryHydrantApar(
+    data: Omit<HistoryHydrantAparData, 'id' | 'created_at'>,
+  ): Promise<ApiResponse<HistoryHydrantAparData>> {
+    return this.fetchWithAuth<HistoryHydrantAparData>('/history_hydrantApar', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update history berdasarkan ID.
+   * Endpoint: PUT /history_hydrantApar/{id}
+   */
+  async updateHistoryHydrantApar(
+    id: number,
+    data: Partial<Omit<HistoryHydrantAparData, 'id' | 'created_at'>>,
+  ): Promise<ApiResponse<HistoryHydrantAparData>> {
+    return this.fetchWithAuth<HistoryHydrantAparData>(`/history_hydrantApar/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Hapus history berdasarkan ID.
+   * Endpoint: DELETE /history_hydrantApar/{id}
+   */
+  async deleteHistoryHydrantApar(id: number): Promise<ApiResponse<{ message: string }>> {
+    return this.fetchWithAuth<{ message: string }>(`/history_hydrantApar/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   /**
    * Hitung statistik Hydrant & APAR secara lokal dari data yang di-fetch.
    * Digunakan untuk dashboard summary tanpa perlu endpoint tambahan di backend.
    */
   async getHydrantAparStats(): Promise<ApiResponse<HydrantAparStats>> {
-    const result = await this.getHydrantApar(0, 10000);
+    const result = await this.getHydrantApar();
     if (!result.success || !result.data) {
       return { success: false, error: result.error ?? 'Failed to fetch hydrant/apar data' };
     }
@@ -770,7 +935,7 @@ class ApiService {
         this.getFakultasTeknik(0, 1000),
         this.getFakultasFikom(0, 1000),
         this.getFakultasHukum(0, 1000),
-        this.getHydrantApar(0, 10000),
+        this.getHydrantApar(),
       ]);
 
       // Gabungkan semua data ruangan yang berhasil
